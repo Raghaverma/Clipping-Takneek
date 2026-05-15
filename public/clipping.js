@@ -324,6 +324,7 @@ const ZOOM_MIN = 1, ZOOM_MAX = 12, ZOOM_SPEED = 0.12;
 
 function _cdDomInit() {
   videoEl = document.getElementById('cd-video');
+  videoEl.crossOrigin = 'anonymous';
   seekWrap = document.getElementById('cd-seekbar-wrap');
   seekTrack = document.getElementById('cd-seek-track');
   seekFill = document.getElementById('cd-seek-fill');
