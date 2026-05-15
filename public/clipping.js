@@ -919,17 +919,28 @@ function _detachClipBoundary() {
 }
 
 function cdSelectClip(id) {
+  // Save departing clip's annotation state before switching
+  if (CD.selectedClipId) {
+    const cur = CD.clips.find(c => c.id === CD.selectedClipId);
+    if (cur) cur.annotEngineState = _cloneAnnotEngine(CD.annotEngine);
+  }
+
   CD.selectedClipId = CD.selectedClipId === id ? null : id;
-  renderClips(); renderMarkers(); renderAnnPanel();
+  renderClips(); renderMarkers();
   if (CD.selectedClipId) {
     const clip = CD.clips.find(c => c.id === CD.selectedClipId);
     if (clip) {
+      _restoreAnnotEngine(clip.annotEngineState || null);
       videoEl.currentTime = clip.inTime;
       _attachClipBoundary(clip);
     }
   } else {
+    _restoreAnnotEngine(null);
     _detachClipBoundary();
   }
+  renderAnnPanel();
+  cdAnnotRender();
+  cdAnnotDrawCanvas();
 }
 
 function cdDeleteClip(e, id) {
@@ -1480,18 +1491,18 @@ function buildMetadata() {
     ...(topLevelSpeed ? { ball_speed: topLevelSpeed } : {}),
     ...(annotationData ? { annotation: annotationData } : {}),
     clips: CD.clips.map((clip, i) => {
-      // Filter ball points that fall within this clip's time range
-      const clipBallFrames = Object.keys(ae.points.ball)
-        .map(Number)
-        .filter(f => {
-          const t = f / CD.fps;
-          return t >= clip.inTime && t <= clip.outTime;
-        })
-        .sort((a, b) => a - b);
+      // Use each clip's own annotEngine state for per-clip ball speed
+      const clipAe = clip.id === CD.selectedClipId
+        ? CD.annotEngine
+        : (clip.annotEngineState || null);
 
-      const canvasW = _sCanvas.width || 1;
-      const canvasH = _sCanvas.height || 1;
-      const _cs = _speedFromBallFrames(clipBallFrames, ae.points.ball, ae.calibration.scale, canvasW, canvasH);
+      let _cs = null;
+      if (clipAe && Object.keys(clipAe.points.ball).length > 0) {
+        const canvasW = _sCanvas.width || 1;
+        const canvasH = _sCanvas.height || 1;
+        const allBallFrames = Object.keys(clipAe.points.ball).map(Number).sort((a, b) => a - b);
+        _cs = _speedFromBallFrames(allBallFrames, clipAe.points.ball, clipAe.calibration.scale, canvasW, canvasH);
+      }
 
       const obj = {
         clipId: clip.id,
@@ -1627,6 +1638,54 @@ let _cropperInstance = null;
 
 function _currentFrame() {
   return Math.floor((videoEl?.currentTime || 0) * CD.fps);
+}
+
+function _cloneAnnotEngine(ae) {
+  return {
+    points: { ball: JSON.parse(JSON.stringify(ae.points.ball)) },
+    calibration: {
+      refA: ae.calibration.refA ? { ...ae.calibration.refA } : null,
+      refB: ae.calibration.refB ? { ...ae.calibration.refB } : null,
+      distance_m: ae.calibration.distance_m,
+      scale: ae.calibration.scale,
+      lockedBallScale: ae.calibration.lockedBallScale ?? null,
+      lockedDiamNorm: ae.calibration.lockedDiamNorm ?? null,
+      lockedBallMm: ae.calibration.lockedBallMm ?? null,
+    },
+    speedResult: ae.speedResult ? { ...ae.speedResult } : null,
+  };
+}
+
+function _restoreAnnotEngine(state) {
+  const ae = CD.annotEngine;
+  if (state) {
+    ae.points = { ball: JSON.parse(JSON.stringify(state.points.ball)) };
+    ae.calibration.refA = state.calibration.refA ? { ...state.calibration.refA } : null;
+    ae.calibration.refB = state.calibration.refB ? { ...state.calibration.refB } : null;
+    ae.calibration.distance_m = state.calibration.distance_m;
+    ae.calibration.scale = state.calibration.scale;
+    if (state.calibration.lockedBallScale) {
+      ae.calibration.lockedBallScale = state.calibration.lockedBallScale;
+      ae.calibration.lockedDiamNorm = state.calibration.lockedDiamNorm;
+      ae.calibration.lockedBallMm = state.calibration.lockedBallMm;
+    } else {
+      delete ae.calibration.lockedBallScale;
+      delete ae.calibration.lockedDiamNorm;
+      delete ae.calibration.lockedBallMm;
+    }
+    ae.speedResult = state.speedResult ? { ...state.speedResult } : null;
+  } else {
+    ae.points = { ball: {} };
+    ae.calibration.refA = null;
+    ae.calibration.refB = null;
+    ae.calibration.scale = null;
+    delete ae.calibration.lockedBallScale;
+    delete ae.calibration.lockedDiamNorm;
+    delete ae.calibration.lockedBallMm;
+    ae.speedResult = null;
+  }
+  ae.mode = 'none';
+  ae.drag = null;
 }
 
 let _lastAnnotFrame = -1;
