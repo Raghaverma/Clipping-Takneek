@@ -36,6 +36,13 @@
   --transition: 0.15s ease;
 }
 
+/* ── Display utility classes ──────────────────────────────── */
+.is-hidden { display: none !important; }
+.is-flex   { display: flex; }
+.is-block  { display: block; }
+.is-grid   { display: grid; }
+.cd-ball-crop-img { display: block; max-width: 100%; }
+
 /* ── Auth steps ─────────────────────────────────────────────── */
 .cd-auth-step {
   display: flex;
@@ -578,7 +585,6 @@ input, select {
   overflow: hidden;
 }
 
-/* ─── (old left panel cards removed — now video browser) ─── */
 
 /* Browser status line */
 .cd-browser-status {

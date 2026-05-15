@@ -1,25 +1,27 @@
 'use strict';
 
-/* ═══════════════════════════════════════════════════════════
-   Clipping Dashboard — Application Logic
-   ═══════════════════════════════════════════════════════════ */
+// Clipping Dashboard — Application Logic
+// All cd*/CD globals are referenced from app/page.js (loaded via <Script> tag).
 
-// ── Config ─────────────────────────────────────────────────────
 const TAKNEEK_API = 'https://takneek.crik.ai/api/v1';
 const ADMIN_API   = 'https://hierocratical-unbreathing-ma.ngrok-free.dev/api/v1';
 
 // R2 metadata upload — fill in your Worker/bucket URL and token
-const R2_METADATA_URL = '';   // e.g. 'https://your-worker.workers.dev/metadata'
-const R2_METADATA_TOKEN = '';   // Bearer token or API key
+const R2_METADATA_URL = '';
+const R2_METADATA_TOKEN = '';
 
-// ── Auth ────────────────────────────────────────────────────────
+// Show/hide helpers — replace scattered style.display assignments
+function _show(el, display = 'flex') { if (el) { el.classList.remove('is-hidden'); el.style.display = display; } }
+function _hide(el) { if (el) { el.classList.add('is-hidden'); el.style.display = 'none'; } }
+function _showId(id, d) { _show(document.getElementById(id), d); }
+function _hideId(id)    { _hide(document.getElementById(id)); }
+
 const AUTH = {
   token: null,
   deviceId: null,
   sseAbort: null,
 };
 
-// ── State ──────────────────────────────────────────────────────
 const CD = {
   // API data
   allVideos: [],   // full list from API
@@ -58,7 +60,6 @@ const CD = {
   },
 };
 
-// ── Bowling stage labels ────────────────────────────────────────
 const STAGES = {
   run_up: 'Run Up',
   back_foot_contact: 'BFC (Back Foot Contact)',
@@ -71,7 +72,6 @@ const STAGES = {
 // Stages that require a frame range (start→end) instead of a single frame
 const RANGE_STAGES = new Set(['run_up', 'back_foot_contact', 'front_foot_landing', 'follow_through']);
 
-// ── Batsman shot types ──────────────────────────────────────────
 const BATSMAN_SHOTS = {
   defense:        'Defense',
   cover_drive:    'Cover Drive',
@@ -87,7 +87,6 @@ const BATSMAN_SHOTS = {
   back_foot_punch:'Back Foot Punch',
 };
 
-// ── Batsman movement stages ─────────────────────────────────────
 const BATSMAN_STAGES = {
   stance:         'Stance / Guard',
   backswing:      'Backswing',
@@ -98,7 +97,6 @@ const BATSMAN_STAGES = {
 const BATSMAN_STAGE_ORDER = ['stance', 'backswing', 'footwork', 'contact', 'follow_through'];
 const BATSMAN_RANGE_STAGES = new Set(['backswing', 'footwork', 'follow_through']);
 
-// ── Analysis type display labels ────────────────────────────────
 const ANGLE_LABELS = {
   batter: 'Batter',
   bowler: 'Bowler',
@@ -106,7 +104,6 @@ const ANGLE_LABELS = {
   other: 'Other',
 };
 
-// ── Request headers ─────────────────────────────────────────────
 function tkHeaders() {
   const h = { 'Content-Type': 'application/json' };
   if (AUTH.token) h['Authorization'] = `Bearer ${AUTH.token}`;
@@ -122,134 +119,11 @@ function adminHeaders() {
   return h;
 }
 
-// ═══════════════════════════════════════════════════════════
-// Auth — init, login, signup, logout, SSE
-// ═══════════════════════════════════════════════════════════
-
-function _authDeviceId() {
-  let id = localStorage.getItem('tk_device_id');
-  if (!id) {
-    id = 'admin-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    localStorage.setItem('tk_device_id', id);
-  }
-  return id;
-}
-
 function cdAuthInit() {
   cdConnectSSE();
   cdFetchVideos();
 }
 
-function _authShowOverlay() {
-  document.getElementById('cd-auth-overlay').classList.remove('hidden');
-}
-
-function _authHideOverlay() {
-  document.getElementById('cd-auth-overlay').classList.add('hidden');
-}
-
-function cdAuthShowSignup() {
-  document.getElementById('cd-auth-login-form').style.display = 'none';
-  document.getElementById('cd-auth-signup-form').style.display = 'flex';
-  document.getElementById('cd-auth-card-title').textContent = 'Create Takneek Account';
-  document.getElementById('cd-auth-login-error').style.display = 'none';
-}
-
-function cdAuthShowLogin() {
-  document.getElementById('cd-auth-signup-form').style.display = 'none';
-  document.getElementById('cd-auth-login-form').style.display = 'flex';
-  document.getElementById('cd-auth-card-title').textContent = 'Takneek API Login';
-  document.getElementById('cd-auth-signup-error').style.display = 'none';
-}
-
-function _authSetLoading(btnId, labelId, loading, text) {
-  const btn = document.getElementById(btnId);
-  const lbl = document.getElementById(labelId);
-  btn.disabled = loading;
-  lbl.textContent = loading ? 'Please wait…' : text;
-}
-
-function _authShowError(elId, msg) {
-  const el = document.getElementById(elId);
-  el.textContent = msg;
-  el.style.display = 'block';
-}
-
-async function cdAuthLogin() {
-  const email    = document.getElementById('cd-auth-email').value.trim();
-  const password = document.getElementById('cd-auth-password').value;
-  const errEl    = 'cd-auth-login-error';
-
-  document.getElementById(errEl).style.display = 'none';
-  if (!email || !password) { _authShowError(errEl, 'Email and password are required.'); return; }
-
-  _authSetLoading('cd-auth-login-btn', 'cd-auth-login-label', true, 'Sign In');
-  try {
-    const res = await fetch(`${ADMIN_API}/admin/login`, {
-      method: 'POST',
-      headers: adminHeaders(),
-      body: JSON.stringify({ email, password, device_id: AUTH.deviceId }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
-
-    AUTH.token = data.token || data.access_token || data.data?.token;
-    if (!AUTH.token) throw new Error('No token in response');
-
-    localStorage.setItem('tk_admin_token', AUTH.token);
-    _authHideOverlay();
-    cdConnectSSE();
-    cdFetchVideos();
-  } catch (err) {
-    _authShowError(errEl, err.message || 'Login failed. Check your credentials.');
-  } finally {
-    _authSetLoading('cd-auth-login-btn', 'cd-auth-login-label', false, 'Sign In');
-  }
-}
-
-async function cdAuthSignup() {
-  const full_name    = document.getElementById('cd-auth-signup-name').value.trim();
-  const email        = document.getElementById('cd-auth-signup-email').value.trim();
-  const phone_raw    = document.getElementById('cd-auth-signup-phone').value.trim();
-  const password     = document.getElementById('cd-auth-signup-password').value;
-  const errEl        = 'cd-auth-signup-error';
-  const phone_number = phone_raw.startsWith('+') ? phone_raw : '+91' + phone_raw;
-
-  document.getElementById(errEl).style.display = 'none';
-  if (!full_name || !email || !phone_raw || !password) {
-    _authShowError(errEl, 'All fields are required.'); return;
-  }
-
-  _authSetLoading('cd-auth-signup-btn', 'cd-auth-signup-label', true, 'Create Account');
-  try {
-    const res = await fetch(`${ADMIN_API}/admin/signup`, {
-      method: 'POST',
-      headers: adminHeaders(),
-      body: JSON.stringify({ email, password, phone_number, full_name }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
-
-    // Auto-login after signup
-    document.getElementById('cd-auth-email').value = email;
-    document.getElementById('cd-auth-password').value = password;
-    cdAuthShowLogin();
-    await cdAuthLogin();
-  } catch (err) {
-    _authShowError(errEl, err.message || 'Signup failed. Try again.');
-  } finally {
-    _authSetLoading('cd-auth-signup-btn', 'cd-auth-signup-label', false, 'Create Account');
-  }
-}
-
-function cdAuthLogout() {
-  if (AUTH.sseAbort) { AUTH.sseAbort.abort(); AUTH.sseAbort = null; }
-  VideoStreamService.reset();
-  CD.allVideos = [];
-  CD.filteredVideos = [];
-}
-
-// ── Admin SSE stream ───────────────────────────────────────────
 // Uses fetch() so we can send Authorization + ngrok headers
 // (EventSource doesn't support custom headers)
 function cdConnectSSE() {
@@ -345,28 +219,8 @@ function _mapStreamItem(item) {
   };
 }
 
-// ── Electron bridge helper ────────────────────────────────────────
-const _electron = () => window.electron || window.parent?.electron;
-
-// Track local video path for export
-let localVideoPath = null;
-
-// ═══════════════════════════════════════════════════════════
-// Load local video from file system
-// ═══════════════════════════════════════════════════════════
+// Load local video from file system (web — hidden <input type="file">)
 async function cdLoadLocalVideo() {
-  const api = _electron();
-
-  // Electron path — native file dialog
-  if (api?.takneekPickLocalVideo) {
-    cdStatus('Opening file picker...');
-    const filePath = await api.takneekPickLocalVideo();
-    if (!filePath) { cdStatus('File selection cancelled'); return; }
-    _loadVideoFromPath(filePath);
-    return;
-  }
-
-  // Web path — hidden <input type="file">
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.mp4,.mov,.avi,.mkv,.webm,.mts,.ts,video/*';
@@ -378,7 +232,6 @@ async function cdLoadLocalVideo() {
   input.click();
 }
 
-// ── Drag-and-drop handlers ────────────────────────────────────
 function cdDragOver(e) {
   e.preventDefault();
   e.stopPropagation();
@@ -402,87 +255,21 @@ function cdDrop(e) {
   const file = e.dataTransfer?.files?.[0];
   if (!file) return;
 
-  // Validate video type
   const validExts = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mts', 'ts'];
   const ext = file.name.split('.').pop().toLowerCase();
   if (!validExts.includes(ext)) {
     cdStatus('Unsupported file type: .' + ext, 'err');
     return;
   }
-
-  // Electron: dropped files have a .path property; web: use blob URL
-  if (file.path) {
-    _loadVideoFromPath(file.path);
-  } else {
-    _loadVideoFromBlob(file);
-  }
+  _loadVideoFromBlob(file);
 }
 
-// ── Core: load any local video by path ────────────────────────
-function _loadVideoFromPath(filePath) {
-  localVideoPath = filePath;
-  const parts = filePath.replace(/\\/g, '/').split('/');
-  const fileName = parts[parts.length - 1];
-
-  // Create a synthetic video entry
-  CD.activeVideo = {
-    id: 'local-' + Date.now(),
-    display_name: fileName,
-    player_name: 'Local File',
-    angle: 'other',
-    video_url: filePath,
-    analysis_type: CD.category === 'bowler' ? 'bowler' : 'batter',
-  };
-
-  // Reset clip state
-  CD.clips = [];
-  CD.clipCounter = 0;
-  CD.annCounter = 0;
-  CD.inPoint = null;
-  CD.outPoint = null;
-  CD.generated = false;
-  CD.selectedClipId = null;
-  CD.duration = 0;
-  CD.sessionId = uid('sess');
-
-  // Show video info bar
-  const bar = document.getElementById('cd-video-bar');
-  bar.style.display = 'flex';
-  document.getElementById('cd-vbar-name').textContent = fileName;
-  document.getElementById('cd-vbar-player').textContent = 'Local File';
-  document.getElementById('cd-vbar-angle').textContent = 'Local';
-  document.getElementById('cd-vbar-dur').textContent = '';
-
-  // Load into player
-  document.getElementById('cd-placeholder').style.display = 'none';
-  videoEl.style.display = 'block';
-  videoEl.src = 'file://' + filePath;
-  videoEl.load();
-
-  // Reset UI
-  seekFill.style.width = '0%';
-  seekBuffer.style.width = '0%';
-  seekThumb.style.left = '0%';
-  timeCur.textContent = '0:00.0';
-  timeDur.textContent = '--';
-  seekLayers.innerHTML = '';
-
-  renderInOut();
-  renderClips();
-  renderAnnPanel();
-  syncMuteBtn(videoEl.muted);
-  updateUploadBtn();
-
-  cdStatus('Loaded local file: ' + fileName, 'ok');
-}
-
-// ── Web fallback: load a File object via blob URL ─────────────
+// Load a File object via blob URL
 let _currentBlobUrl = null;
 function _loadVideoFromBlob(file) {
   if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
   const blobUrl = URL.createObjectURL(file);
   _currentBlobUrl = blobUrl;
-  localVideoPath = null; // no path on web — triggers browser-side fallbacks in export/preview
 
   const fileName = file.name;
 
@@ -500,15 +287,14 @@ function _loadVideoFromBlob(file) {
   CD.selectedClipId = null; CD.duration = 0;
   CD.sessionId = uid('sess');
 
-  const bar = document.getElementById('cd-video-bar');
-  bar.style.display = 'flex';
+  _showId('cd-video-bar', 'flex');
   document.getElementById('cd-vbar-name').textContent = fileName;
   document.getElementById('cd-vbar-player').textContent = 'Local File';
   document.getElementById('cd-vbar-angle').textContent = 'Local';
   document.getElementById('cd-vbar-dur').textContent = '';
 
-  document.getElementById('cd-placeholder').style.display = 'none';
-  videoEl.style.display = 'block';
+  _hideId('cd-placeholder');
+  _show(videoEl, 'block');
   videoEl.src = blobUrl;
   videoEl.load();
 
@@ -524,21 +310,18 @@ function _loadVideoFromBlob(file) {
   cdStatus('Loaded: ' + fileName, 'ok');
 }
 
-// ── DOM refs ────────────────────────────────────────────────────
+// DOM refs (initialised in _cdDomInit)
 let videoEl, seekWrap, seekTrack, seekFill, seekBuffer, seekThumb,
   seekLayers, seekTooltip, timeCur, timeDur, playBtn, muteBtn, statusBar;
 
-// ── Annotation canvas refs ────────────────────────────────────
+// Annotation canvas refs
 let _sCanvas = null, _sCtx = null;
 let _gridEnabled = false;
 
-// ── Player zoom state ─────────────────────────────────────────
+// Player zoom state
 const ZOOM = { level: 1, panX: 0, panY: 0 };
 const ZOOM_MIN = 1, ZOOM_MAX = 12, ZOOM_SPEED = 0.12;
 
-// ═══════════════════════════════════════════════════════════
-// Init
-// ═══════════════════════════════════════════════════════════
 function _cdDomInit() {
   videoEl = document.getElementById('cd-video');
   seekWrap = document.getElementById('cd-seekbar-wrap');
@@ -597,9 +380,7 @@ if (document.readyState === 'loading') {
   setTimeout(_cdDomInit, 0);
 }
 
-// ═══════════════════════════════════════════════════════════
 // Utilities
-// ═══════════════════════════════════════════════════════════
 function fmtTime(s) {
   if (s === null || s === undefined || isNaN(s)) return '—';
   const neg = s < 0;
@@ -641,9 +422,7 @@ function angleLabel(a) {
   return ANGLE_LABELS[a] || (a || '—');
 }
 
-// ═══════════════════════════════════════════════════════════
 // VideoStreamService — SSE via fetch (supports auth headers)
-// ═══════════════════════════════════════════════════════════
 const VideoStreamService = (() => {
   let _abort = null;
   let _retryTimer = null;
@@ -754,7 +533,6 @@ function cdFetchVideos() {
   VideoStreamService.connect(AUTH.token);
 }
 
-// ── Apply search + angle filter ────────────────────────────────
 function cdFilterVideos() {
   const q = (document.getElementById('cd-search-input')?.value || '').toLowerCase().trim();
   const angle = document.getElementById('cd-angle-filter')?.value || '';
@@ -771,7 +549,6 @@ function cdFilterVideos() {
   renderVideoList();
 }
 
-// ── Status helpers ─────────────────────────────────────────────
 const STATUS_META = {
   pending:    { label: 'Queued',     cls: 'cd-status--pending',    icon: '⏳' },
   processing: { label: 'Processing', cls: 'cd-status--processing', icon: null },
@@ -806,7 +583,6 @@ function _itemIcon(status, streamable) {
   </div>`;
 }
 
-// ── Render video list in left panel ────────────────────────────
 function renderVideoList() {
   const list = document.getElementById('cd-video-list');
   const label = document.getElementById('cd-video-count-label');
@@ -862,9 +638,7 @@ function renderVideoListError(msg) {
     </div>`;
 }
 
-// ═══════════════════════════════════════════════════════════
 // Select a video → load into player
-// ═══════════════════════════════════════════════════════════
 async function cdSelectVideo(id) {
   const video = CD.allVideos.find(v => v.id === id);
   if (!video) return;
@@ -939,9 +713,7 @@ async function cdSelectVideo(id) {
   cdStatus(`Loading "${name}"…`);
 }
 
-// ═══════════════════════════════════════════════════════════
 // Video element events
-// ═══════════════════════════════════════════════════════════
 function onVideoLoaded() {
   CD.duration = videoEl.duration;
   timeDur.textContent = fmtTime(CD.duration);
@@ -984,9 +756,7 @@ function onTimeUpdate() {
   timeCur.textContent = fmtTime(t);
 }
 
-// ═══════════════════════════════════════════════════════════
 // Playback
-// ═══════════════════════════════════════════════════════════
 function cdTogglePlay() {
   if (!CD.activeVideo) return;
   if (videoEl.paused) videoEl.play().catch(() => { });
@@ -1020,9 +790,7 @@ function syncMuteBtn(muted) {
     : `<svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>`;
 }
 
-// ═══════════════════════════════════════════════════════════
 // Seek bar interaction
-// ═══════════════════════════════════════════════════════════
 function onSeekDown(e) {
   if (!CD.duration) return;
   e.preventDefault();
@@ -1049,9 +817,7 @@ function onSeekHover(e) {
   seekTooltip.style.opacity = '1';
 }
 
-// ═══════════════════════════════════════════════════════════
 // Start / End markers
-// ═══════════════════════════════════════════════════════════
 function cdSetIn() {
   if (!CD.activeVideo) return;
   CD.inPoint = videoEl.currentTime;
@@ -1108,9 +874,7 @@ function renderMarkers() {
   seekLayers.innerHTML = html;
 }
 
-// ═══════════════════════════════════════════════════════════
 // Add clip
-// ═══════════════════════════════════════════════════════════
 function cdAddClip() {
   if (!CD.activeVideo) { cdStatus('Select a video first', 'err'); return; }
   if (CD.inPoint === null) { cdStatus('Set a Start point first (press I)', 'err'); return; }
@@ -1132,9 +896,7 @@ function cdAddClip() {
   if (CD.category === 'bowler') cdSelectClip(clip.id);
 }
 
-// ═══════════════════════════════════════════════════════════
 // Clip selection / deletion
-// ═══════════════════════════════════════════════════════════
 let _clipBoundaryFn = null;
 
 function _attachClipBoundary(clip) {
@@ -1232,9 +994,6 @@ function renderClips() {
           <div class="cd-clip-right">
             <span class="cd-clip-dur">${fmtTime(dur)}</span>
             ${shotBadge}${annBadge}
-            <button class="cd-clip-test" onclick="cdTestClip(event,'${clip.id}')" title="Preview this clip">
-              <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11"><path d="M8 5v14l11-7z"/></svg>
-            </button>
             <button class="cd-clip-del" onclick="cdDeleteClip(event,'${clip.id}')" title="Delete">×</button>
           </div>
         </div>
@@ -1243,9 +1002,7 @@ function renderClips() {
   }).join('');
 }
 
-// ═══════════════════════════════════════════════════════════
 // Annotation (bowler)
-// ═══════════════════════════════════════════════════════════
 // Stage order for the checklist
 const STAGE_ORDER = ['run_up', 'back_foot_contact', 'delivery_stride', 'front_foot_landing', 'ball_release', 'follow_through'];
 
@@ -1276,7 +1033,6 @@ function renderAnnPanel() {
   stagesEl.style.display = 'block';
   header.textContent = clip.label;
 
-  // ── Bowler panel ───────────────────────────────────────────
   if (isBowler) {
     const done = clip.annotations.length;
     progress.textContent = `${done}/${STAGE_ORDER.length}`;
@@ -1314,7 +1070,6 @@ function renderAnnPanel() {
     return;
   }
 
-  // ── Batsman panel ──────────────────────────────────────────
   if (isBatsman) {
     const done = clip.annotations.length;
     progress.textContent = `${done}/${BATSMAN_STAGE_ORDER.length}`;
@@ -1428,7 +1183,6 @@ function cdClearStage(clipId, stage) {
   cdStatus(`${STAGES[stage]} cleared`, 'info');
 }
 
-// ── Batsman: set shot type ─────────────────────────────────────
 function cdSetShotType(clipId, shotType) {
   const clip = CD.clips.find(c => c.id === clipId);
   if (!clip) return;
@@ -1438,7 +1192,6 @@ function cdSetShotType(clipId, shotType) {
   cdStatus(shotType ? `Shot type: ${BATSMAN_SHOTS[shotType] || shotType}` : 'Shot type cleared', 'ok');
 }
 
-// ── Batsman: mark a movement stage ────────────────────────────
 function cdMarkBatsmanStage(stage, which) {
   if (!CD.selectedClipId) return;
   const clip = CD.clips.find(c => c.id === CD.selectedClipId);
@@ -1478,7 +1231,6 @@ function cdMarkBatsmanStage(stage, which) {
   }
 }
 
-// ── Batsman: clear a movement stage ───────────────────────────
 function cdClearBatsmanStage(clipId, stage) {
   const clip = CD.clips.find(c => c.id === clipId);
   if (!clip) return;
@@ -1498,9 +1250,7 @@ function cdDeleteAnnotation(e, clipId, annId) {
   cdStatus('Annotation removed');
 }
 
-// ═══════════════════════════════════════════════════════════
 // Category switching
-// ═══════════════════════════════════════════════════════════
 function cdSetCategory(cat) {
   CD.category = cat;
   ['cd-cat-batsman','cd-type-batsman'].forEach(id => {
@@ -1514,9 +1264,7 @@ function cdSetCategory(cat) {
   if (statusBar) cdStatus(`Category → ${cat === 'batsman' ? 'Batsman' : 'Bowler'}`);
 }
 
-// ═══════════════════════════════════════════════════════════
 // Generate + Upload
-// ═══════════════════════════════════════════════════════════
 function cdGenerateClips(silent = false) {
   if (!CD.activeVideo) { cdStatus('Select a video first', 'err'); return; }
   if (CD.clips.length === 0) { cdStatus('Add at least one clip first', 'err'); return; }
@@ -1544,7 +1292,6 @@ function cdGenerateClips(silent = false) {
   cdUploadMetadataToR2(metadata, silent);
 }
 
-// ── R2 metadata upload ─────────────────────────────────────
 async function cdUploadMetadataToR2(metadata, silent = false) {
   if (!R2_METADATA_URL) return; // not configured yet
 
@@ -1570,167 +1317,32 @@ async function cdUploadMetadataToR2(metadata, silent = false) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// ═══════════════════════════════════════════════════════════
-
-// Cut the clip with ffmpeg and load the trimmed video into the player
-async function cdTestClip(e, clipId) {
-  e.stopPropagation();
-  const clip = CD.clips.find(c => c.id === clipId);
-  if (!clip || !CD.activeVideo) return;
-
-  const api = _electron();
-
-  // If we have a local file path and the Electron API, do a real ffmpeg cut
-  if (localVideoPath && api?.takneekCutSingleClip) {
-    const btn = e.target.closest('button') || e.target;
-    btn.disabled = true;
-
-    // Show mini player in loading state
-    const miniPlayer = document.getElementById('cd-clip-player');
-    const miniLoading = document.getElementById('cd-clip-player-loading');
-    const miniVideo = document.getElementById('cd-clip-video');
-    const miniLabel = document.getElementById('cd-clip-player-label');
-
-    miniLabel.textContent = clip.label;
-    miniPlayer.style.display = 'block';
-    miniLoading.style.display = 'flex';
-    miniVideo.style.display = 'none';
-    miniVideo.pause();
-    miniVideo.src = '';
-
-    cdStatus(`Cutting ${escHtml(clip.label)}…`, 'info');
-
-    try {
-      const outPath = await api.takneekCutSingleClip({
-        videoPath: localVideoPath,
-        inTime: clip.inTime,
-        outTime: clip.outTime,
-        label: clip.label,
-      });
-
-      // Load trimmed clip into the mini player — main player is untouched
-      miniLoading.style.display = 'none';
-      miniVideo.style.display = 'block';
-      miniVideo.src = 'file://' + outPath;
-      miniVideo.load();
-      miniVideo.play().catch(() => { });
-      cdStatus(`Playing ${escHtml(clip.label)} in clip player`, 'ok');
-    } catch (err) {
-      miniPlayer.style.display = 'none';
-      cdStatus(`Cut failed — ${err.message}`, 'err');
-    } finally {
-      btn.disabled = false;
-    }
-    return;
-  }
-
-  // Fallback: boundary-based preview in the original video
-  videoEl.pause();
-  videoEl.currentTime = clip.inTime;
-  const onUpdate = () => {
-    if (videoEl.currentTime >= clip.outTime) {
-      videoEl.pause();
-      videoEl.currentTime = clip.outTime;
-      videoEl.removeEventListener('timeupdate', onUpdate);
-      cdStatus(`Preview done — ${escHtml(clip.label)}`, 'ok');
-    }
-  };
-  videoEl.addEventListener('timeupdate', onUpdate);
-  const onPause = () => {
-    videoEl.removeEventListener('timeupdate', onUpdate);
-    videoEl.removeEventListener('pause', onPause);
-  };
-  videoEl.addEventListener('pause', onPause);
-  videoEl.play().catch(() => { });
-  cdStatus(`Previewing ${escHtml(clip.label)} — ${fmtTime(clip.inTime)} → ${fmtTime(clip.outTime)}`, 'info');
-}
-
 function cdCloseClipPlayer() {
   const miniPlayer = document.getElementById('cd-clip-player');
   const miniVideo = document.getElementById('cd-clip-video');
   if (miniVideo) { miniVideo.pause(); miniVideo.src = ''; }
-  if (miniPlayer) miniPlayer.style.display = 'none';
+  _hide(miniPlayer);
 }
 
-
-
-// ═══════════════════════════════════════════════════════════
-// Export Data — ffmpeg split to ~/Desktop/Annotated Data AutoClipping
-// ═══════════════════════════════════════════════════════════
+// Export — download metadata as JSON
 async function cdExportClips() {
   if (!CD.activeVideo) { cdStatus('Select a video first', 'err'); return; }
   if (CD.clips.length === 0) { cdStatus('Add at least one clip first', 'err'); return; }
 
-  // We need the local file path for ffmpeg
-  if (!localVideoPath) {
-    cdStatus('Export only works with locally loaded videos. Use "Load Local" first.', 'err');
-    return;
-  }
+  const metadata = buildMetadata();
+  CD._lastMetadata = metadata;
+  CD.generated = true;
+  updateUploadBtn();
 
-  const api = _electron();
-  if (!api?.takneekExportClips) {
-    // Web fallback: download metadata as JSON
-    const metadata = buildMetadata();
-    CD._lastMetadata = metadata;
-    CD.generated = true;
-    updateUploadBtn();
-    const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
-    const dlUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = dlUrl;
-    a.download = `takneek_${(CD.activeVideo?.player_name || 'session').replace(/\s+/g, '_')}_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(dlUrl);
-    cdUploadMetadataToR2(metadata);
-    cdStatus(`Exported metadata JSON — ${CD.clips.length} clip(s)`, 'ok');
-    return;
-  }
-
-  const btn = document.getElementById('cd-export-btn');
-  btn.disabled = true;
-  cdStatus(`Exporting ${CD.clips.length} clip(s) via ffmpeg…`, 'info');
-
-  try {
-    const clipData = CD.clips.map(c => ({
-      label: c.label,
-      inTime: parseFloat(c.inTime.toFixed(3)),
-      outTime: parseFloat(c.outTime.toFixed(3)),
-      annotations: c.annotations || [],
-    }));
-
-    // Always build fresh metadata so export never depends on Generate Clips being clicked
-    const metadata = buildMetadata();
-    CD._lastMetadata = metadata;
-    CD.generated = true;
-    updateUploadBtn();
-
-    const result = await api.takneekExportClips({
-      videoPath: localVideoPath,
-      clips: clipData,
-      category: CD.category,
-      metadata,
-    });
-
-    const ok = result.results.filter(r => r.success).length;
-    const fail = result.results.filter(r => !r.success).length;
-    const speedTag = metadata.ball_speed ? ` · ${metadata.ball_speed.avg_kmh} km/h` : '';
-
-    if (fail === 0) {
-      cdStatus(`✓ Exported ${ok} clip(s)${speedTag} — folder opened`, 'ok');
-    } else {
-      cdStatus(`Exported ${ok} clip(s), ${fail} failed — check console`, 'err');
-    }
-
-    // Upload metadata to R2
-    cdUploadMetadataToR2(metadata);
-    console.log('[Export] Results:', result);
-  } catch (err) {
-    cdStatus(`Export failed — ${err.message}`, 'err');
-    console.error('[Export] Error:', err);
-  } finally {
-    btn.disabled = false;
-  }
+  const blob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+  const dlUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = dlUrl;
+  a.download = `takneek_${(CD.activeVideo?.player_name || 'session').replace(/\s+/g, '_')}_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(dlUrl);
+  cdUploadMetadataToR2(metadata);
+  cdStatus(`Exported metadata JSON — ${CD.clips.length} clip(s)`, 'ok');
 }
 
 async function cdUploadClips() {
@@ -1923,10 +1535,8 @@ function updateUploadBtn() {
   document.getElementById('cd-upload-btn').disabled = CD.clips.length === 0;
 }
 
-// ═══════════════════════════════════════════════════════════
 // Player Zoom
 // Scroll to zoom · Alt+drag to pan · double-click to reset
-// ═══════════════════════════════════════════════════════════
 
 function cdZoomOnWheel(e) {
   if (!CD.activeVideo) return;
@@ -2005,10 +1615,8 @@ function _zoomApply() {
   if (lvl) lvl.textContent = `${ZOOM.level.toFixed(1)}×`;
 }
 
-// ═══════════════════════════════════════════════════════════
 // Annotation Engine
 // Frame-indexed manual annotation with calibration + speed
-// ═══════════════════════════════════════════════════════════
 
 const _AE_COLORS = { ball: '#fbbf24', refA: '#06b6d4', refB: '#06b6d4' };
 const _AE_LABELS = { ball: '●', refA: 'A', refB: 'B' };
@@ -2031,7 +1639,6 @@ function _annotOnTimeUpdate() {
   }
 }
 
-// ── Toggle ─────────────────────────────────────────────────
 function cdAnnotToggle() {
   const ae = CD.annotEngine;
   ae.active = !ae.active;
@@ -2053,7 +1660,6 @@ function cdAnnotToggle() {
   }
 }
 
-// ── Mode ───────────────────────────────────────────────────
 function cdAnnotSetMode(mode) {
   CD.annotEngine.mode = mode;
   cdAnnotUpdateModeBtns();
@@ -2076,7 +1682,6 @@ function cdAnnotUpdateModeBtns() {
   });
 }
 
-// ── Mouse events ───────────────────────────────────────────
 let _aeClickStart = null;
 
 function cdAnnotOnMouseDown(e) {
@@ -2189,8 +1794,6 @@ function _annotSetPoint(type, frame, nx, ny) {
     ae.points[type][frame] = { ...existing, x: nx, y: ny };
   }
 }
-
-// ── Ball crop (CropperJS) ──────────────────────────────────
 
 // Returns the actual rendered video region inside the canvas element,
 // accounting for object-fit:contain letterboxing.
@@ -2335,7 +1938,6 @@ function cdAnnotToggleGrid() {
   cdAnnotDrawCanvas();
 }
 
-// ── Hit test ───────────────────────────────────────────────
 function _annotHitTest(nx, ny) {
   const ae = CD.annotEngine;
   const W = _sCanvas.width, H = _sCanvas.height;
@@ -2350,7 +1952,6 @@ function _annotHitTest(nx, ny) {
   return null;
 }
 
-// ── Calibration ────────────────────────────────────────────
 function _annotComputeScale() {
   const { refA, refB, distance_m } = CD.annotEngine.calibration;
   if (!refA || !refB) return null;
@@ -2365,7 +1966,6 @@ function _annotRecompute() {
   CD.annotEngine.speedResult = _annotComputeSpeed();
 }
 
-// ── Speed computation ──────────────────────────────────────
 function _annotComputeSpeed() {
   const ae = CD.annotEngine;
   const frames = Object.keys(ae.points.ball).map(Number).sort((a, b) => a - b);
@@ -2374,7 +1974,6 @@ function _annotComputeSpeed() {
   return _speedFromBallFrames(frames, ae.points.ball, ae.calibration.scale, W, H);
 }
 
-// ── Point propagation ──────────────────────────────────────
 function _annotGetPropagated(type, targetFrame) {
   const pts = CD.annotEngine.points[type];
   if (!pts) return null;
@@ -2394,7 +1993,6 @@ function _annotGetPropagated(type, targetFrame) {
   return { point: { x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t }, exact: false, interpolated: true };
 }
 
-// ── Clear ──────────────────────────────────────────────────
 function cdAnnotClearFrame() {
   const frame = _currentFrame();
   const ae = CD.annotEngine;
@@ -2421,7 +2019,6 @@ function cdAnnotClearAll() {
   cdStatus('All annotations cleared', 'info');
 }
 
-// ── Render UI panel ────────────────────────────────────────
 function cdAnnotRender() {
   const ae = CD.annotEngine;
   const frame = _currentFrame();
@@ -2498,7 +2095,6 @@ function cdAnnotRender() {
   }
 }
 
-// ── Canvas draw ────────────────────────────────────────────
 function cdAnnotResizeCanvas() {
   if (!_sCanvas) return;
   // Use layout dimensions of the zoom-wrap (unaffected by CSS scale transform)
@@ -2615,9 +2211,6 @@ function _annotDot(ctx, pos, color, label, faded = false, r = 6) {
   ctx.globalAlpha = 1;
 }
 
-// ── Shared math helpers ────────────────────────────────────
-
-
 function _movingAvg(arr, w) {
   return arr.map((_, i) => {
     const lo = Math.max(0, i - Math.floor(w / 2));
@@ -2709,10 +2302,7 @@ function _speedFromBallFrames(frames, points, globalScale, W, H) {
   };
 }
 
-
-// ═══════════════════════════════════════════════════════════
 // Keyboard shortcuts
-// ═══════════════════════════════════════════════════════════
 function onKeyDown(e) {
   const t = e.target;
   if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
@@ -2761,9 +2351,7 @@ function onKeyDown(e) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
 // Dashboard view
-// ═══════════════════════════════════════════════════════════
 
 let _currentView = 'dashboard';
 

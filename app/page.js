@@ -1,22 +1,15 @@
 'use client'
 
-/* global cdFilterVideos, cdSetCategory, cdShowView, cdFetchVideos, cdLoadLocalVideo,
-   cdTogglePlay, cdStepFrame, cdSetIn, cdSetOut, cdAddClip, cdToggleMute,
-   cdSetSpeed, cdClearIn, cdClearOut, cdZoomReset, cdAnnotSetMode, cdAnnotToggleGrid,
-   cdAnnotResetBallScale, cdAnnotClearFrame, cdAnnotClearAll, cdAnnotToggle,
-   cdExportClips, cdUploadClips, cdAnnotCloseBallCrop, cdAnnotConfirmBallCrop,
-   cdCloseClipPlayer, cdDragOver, cdDragLeave, cdDrop, _updateCropInfo, CD,
-   _annotRecompute, cdAnnotRender, cdAnnotDrawCanvas,
-   cdSetShotType, cdMarkBatsmanStage, cdClearBatsmanStage */
+/* eslint-disable no-undef */
+// clipping.js is loaded via <Script> in layout.js and registers globals on window.
 
 export default function TakneekDashboard() {
   return (
     <>
-      {/* ═══ Internal header ═══ */}
       <header className="cd-header">
         <div className="cd-logo">
           <div className="cd-logo-mark">
-            <img src="/Takneek.svg" width="18" height="18" style={{display:'block'}} alt="Takneek" />
+            <img src="/Takneek.svg" width="18" height="18" className="is-block" alt="Takneek" />
           </div>
           <div>
             <div className="cd-logo-text">Takneek</div>
@@ -49,7 +42,6 @@ export default function TakneekDashboard() {
         </button>
       </header>
 
-      {/* ═══ View navigation bar ═══ */}
       <div className="cd-subnav">
         <nav className="cd-view-tabs">
           <button id="cd-tab-dashboard" className="cd-view-tab active" onClick={() => cdShowView('dashboard')}>
@@ -66,20 +58,8 @@ export default function TakneekDashboard() {
           </button>
         </nav>
 
-        <div className="cd-subnav-right">
-          <div className="cd-cat-toggle">
-            <button id="cd-type-batsman" className="cd-cat-btn active" onClick={() => cdSetCategory('batsman')}>Batsman</button>
-            <button id="cd-type-bowler"  className="cd-cat-btn"        onClick={() => cdSetCategory('bowler')}>Bowler</button>
-          </div>
-          <button className="cd-refresh-btn" onClick={() => cdFetchVideos()} title="Refresh data" id="cd-dash-refresh-btn">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15">
-              <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-            </svg>
-          </button>
-        </div>
       </div>
 
-      {/* ═══ Dashboard view ═══ */}
       <div id="cd-dashboard" className="cd-dashboard-view">
 
         <div className="cd-stat-row">
@@ -215,8 +195,7 @@ export default function TakneekDashboard() {
 
       </div>
 
-      {/* ═══ Clipping view — 3 columns ═══ */}
-      <div id="cd-clipping-view" className="cd-clipping-view" style={{display:'none'}}>
+      <div id="cd-clipping-view" className="cd-clipping-view is-hidden">
       <main className="cd-main">
 
         {/* Left panel — video browser */}
@@ -235,7 +214,7 @@ export default function TakneekDashboard() {
         {/* Center — player */}
         <section className="cd-center">
 
-          <div className="cd-video-bar" id="cd-video-bar" style={{display:'none'}}>
+          <div className="cd-video-bar is-hidden" id="cd-video-bar">
             <div className="cd-vbar-left">
               <span className="cd-vbar-name" id="cd-vbar-name">—</span>
               <span className="cd-vbar-player" id="cd-vbar-player"></span>
@@ -261,11 +240,11 @@ export default function TakneekDashboard() {
             </div>
 
             <div id="cd-zoom-wrap" className="cd-zoom-wrap">
-              <video id="cd-video" preload="metadata" style={{display:'none'}}></video>
+              <video id="cd-video" className="is-hidden" preload="metadata"></video>
               <canvas id="cd-speed-canvas" className="cd-speed-canvas"></canvas>
             </div>
 
-            <div className="cd-zoom-badge" id="cd-zoom-badge" style={{display:'none'}}>
+            <div className="cd-zoom-badge is-hidden" id="cd-zoom-badge">
               <span id="cd-zoom-level">1×</span>
               <button className="cd-zoom-reset-btn" onClick={() => cdZoomReset()} title="Reset zoom">↩</button>
             </div>
@@ -349,7 +328,7 @@ export default function TakneekDashboard() {
               <button className="cd-io-x" onClick={() => cdClearOut()} title="Clear end point">×</button>
             </div>
 
-            <span className="cd-io-dur" id="cd-io-dur" style={{display:'none'}}>—</span>
+            <span className="cd-io-dur is-hidden" id="cd-io-dur">—</span>
           </div>
 
           <div className="cd-hints">
@@ -388,7 +367,7 @@ export default function TakneekDashboard() {
             </div>
           </div>
 
-          <div className="cd-clip-player" id="cd-clip-player" style={{display:'none'}}>
+          <div className="cd-clip-player is-hidden" id="cd-clip-player">
             <div className="cd-clip-player-header">
               <span className="cd-clip-player-label" id="cd-clip-player-label">Clip 1</span>
               <button className="cd-clip-player-close" onClick={() => cdCloseClipPlayer()} title="Close">×</button>
@@ -398,12 +377,12 @@ export default function TakneekDashboard() {
                 <div className="cd-spinner"></div>
                 <span>Cutting clip…</span>
               </div>
-              <video id="cd-clip-video" className="cd-clip-video" controls preload="auto" style={{display:'none'}}></video>
+              <video id="cd-clip-video" className="cd-clip-video is-hidden" controls preload="auto"></video>
             </div>
           </div>
 
           {/* Annotation Engine Panel */}
-          <div className="cd-annot-panel" id="cd-annot-panel" style={{display:'none'}}>
+          <div className="cd-annot-panel is-hidden" id="cd-annot-panel">
 
             <div className="cd-annot-modes">
               <button className="cd-mode-btn" id="cd-mode-refA" onClick={() => cdAnnotSetMode('refA')} title="Place Ref A calibration point">A</button>
@@ -435,14 +414,13 @@ export default function TakneekDashboard() {
               </div>
               <div className="cd-annot-scale-row">
                 <div className="cd-annot-scale" id="cd-annot-scale">Place Ref A + Ref B to calibrate</div>
-                <button className="cd-annot-scale-reset-btn" id="cd-annot-scale-reset"
+                <button className="cd-annot-scale-reset-btn is-hidden" id="cd-annot-scale-reset"
                         onClick={() => cdAnnotResetBallScale()}
-                        title="Clear locked scale — next ball click will re-open crop modal"
-                        style={{display:'none'}}>↺</button>
+                        title="Clear locked scale — next ball click will re-open crop modal">↺</button>
               </div>
             </div>
 
-            <div className="cd-annot-speed" id="cd-annot-speed" style={{display:'none'}}>
+            <div className="cd-annot-speed is-hidden" id="cd-annot-speed">
               <div className="cd-annot-speed-display">
                 <span className="cd-annot-kmh" id="cd-annot-kmh">—</span>
                 <span className="cd-annot-unit">km/h</span>
@@ -502,13 +480,12 @@ export default function TakneekDashboard() {
       </main>
       </div>
 
-      {/* ═══ Status bar ═══ */}
       <div className="cd-statusbar" id="cd-statusbar">
         Connecting to Takneek API…
       </div>
 
       {/* Ball crop modal (CropperJS) */}
-      <div className="cd-crop-overlay" id="cd-ball-crop-modal" style={{display:'none'}}>
+      <div className="cd-crop-overlay is-hidden" id="cd-ball-crop-modal">
         <div className="cd-crop-card">
 
           <div className="cd-crop-header">
@@ -526,7 +503,7 @@ export default function TakneekDashboard() {
           </div>
 
           <div className="cd-crop-img-wrap">
-            <img id="cd-ball-crop-img" src={undefined} alt="" style={{display:'block',maxWidth:'100%'}} />
+            <img id="cd-ball-crop-img" src={undefined} alt="" className="cd-ball-crop-img" />
           </div>
 
           <div className="cd-crop-info">
