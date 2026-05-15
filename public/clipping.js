@@ -2364,18 +2364,18 @@ function cdShowView(view) {
   const localBtn = document.getElementById('cd-subnav-local-btn');
 
   if (view === 'dashboard') {
-    dashEl.style.display = 'flex';
-    clippingEl.style.display = 'none';
+    _show(dashEl, 'flex');
+    _hide(clippingEl);
     tabDash.classList.add('active');
     tabClip.classList.remove('active');
-    if (localBtn) localBtn.style.display = 'none';
+    if (localBtn) _hide(localBtn);
     cdRenderDashboard();
   } else {
-    dashEl.style.display = 'none';
-    clippingEl.style.display = 'flex';
+    _hide(dashEl);
+    _show(clippingEl, 'flex');
     tabDash.classList.remove('active');
     tabClip.classList.add('active');
-    if (localBtn) localBtn.style.display = 'inline-flex';
+    if (localBtn) _show(localBtn, 'inline-flex');
   }
 }
 
