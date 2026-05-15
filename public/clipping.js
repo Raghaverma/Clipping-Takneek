@@ -661,7 +661,7 @@ async function cdSelectVideo(id) {
   // Show video info bar
   const bar = document.getElementById('cd-video-bar');
   const name = video.display_name || video.original_filename || `Video ${id}`;
-  bar.style.display = 'flex';
+  _show(bar, 'flex');
   document.getElementById('cd-vbar-name').textContent = name;
   document.getElementById('cd-vbar-player').textContent = video.player_name || '';
   document.getElementById('cd-vbar-angle').textContent = angleLabel(video.angle);
@@ -669,7 +669,7 @@ async function cdSelectVideo(id) {
 
   // Load video — fetch a signed download URL from the Takneek API
   document.getElementById('cd-placeholder').style.display = 'none';
-  videoEl.style.display = 'block';
+  _show(videoEl, 'block');
   cdStatus(`Getting signed URL for "${name}"…`);
 
   try {
@@ -728,7 +728,7 @@ function onVideoLoaded() {
 
 function onVideoError() {
   document.getElementById('cd-placeholder').style.display = 'flex';
-  videoEl.style.display = 'none';
+  _hide(videoEl);
   cdStatus('Failed to load video stream. Is the Takneek server running?', 'err');
 }
 
@@ -850,9 +850,9 @@ function renderInOut() {
 
   if (CD.inPoint !== null && CD.outPoint !== null) {
     durEl.textContent = fmtTime(Math.abs(CD.outPoint - CD.inPoint));
-    durEl.style.display = 'inline-flex';
+    _show(durEl, 'inline-flex');
   } else {
-    durEl.style.display = 'none';
+    _hide(durEl);
   }
 }
 
@@ -1611,7 +1611,7 @@ function _zoomApply() {
 
   const badge = document.getElementById('cd-zoom-badge');
   const lvl = document.getElementById('cd-zoom-level');
-  if (badge) badge.style.display = ZOOM.level > 1.01 ? 'flex' : 'none';
+  if (badge) { if (ZOOM.level > 1.01) _show(badge, 'flex'); else _hide(badge); }
   if (lvl) lvl.textContent = `${ZOOM.level.toFixed(1)}×`;
 }
 
@@ -1643,7 +1643,8 @@ function cdAnnotToggle() {
   const ae = CD.annotEngine;
   ae.active = !ae.active;
 
-  document.getElementById('cd-annot-panel').style.display = ae.active ? 'flex' : 'none';
+  const annotPanel = document.getElementById('cd-annot-panel');
+  if (ae.active) _show(annotPanel, 'flex'); else _hide(annotPanel);
   document.getElementById('cd-annot-btn')?.classList.toggle('active', ae.active);
 
   if (ae.active) {
@@ -1819,7 +1820,7 @@ function cdAnnotOpenBallCrop() {
   cap.getContext('2d').drawImage(videoEl, 0, 0);
 
   const modal = document.getElementById('cd-ball-crop-modal');
-  modal.style.display = 'flex';
+  _show(modal, 'flex');
   modal.dataset.frame = frame;
   document.getElementById('cd-crop-frame-num').textContent = frame;
 
@@ -1917,7 +1918,7 @@ function cdAnnotConfirmBallCrop() {
 
 function cdAnnotCloseBallCrop() {
   if (_cropperInstance) { _cropperInstance.destroy(); _cropperInstance = null; }
-  document.getElementById('cd-ball-crop-modal').style.display = 'none';
+  _hideId('cd-ball-crop-modal');
   document.getElementById('cd-ball-crop-img').src = '';
 }
 
@@ -2041,33 +2042,33 @@ function cdAnnotRender() {
     if (locked) {
       scaleEl.textContent = `Locked · ${(locked * 1000).toFixed(3)} mm/px`;
       scaleEl.classList.add('ready');
-      if (resetBtn) resetBtn.style.display = 'inline';
+      if (resetBtn) _show(resetBtn, 'inline');
     } else if (ballPts.length > 0) {
       const avgBallScale = ballPts.reduce((s, p) => s + p.ballScale, 0) / ballPts.length;
       scaleEl.textContent = `Ball ⌀ ref · ${(avgBallScale * 1000).toFixed(3)} mm/px avg (${ballPts.length} pts)`;
       scaleEl.classList.add('ready');
-      if (resetBtn) resetBtn.style.display = 'none';
+      if (resetBtn) _hide(resetBtn);
     } else if (hasGlobal) {
       scaleEl.textContent = `Ref A/B · ${(ae.calibration.scale * 1000).toFixed(3)} mm/px`;
       scaleEl.classList.add('ready');
-      if (resetBtn) resetBtn.style.display = 'none';
+      if (resetBtn) _hide(resetBtn);
     } else {
       scaleEl.textContent = ae.calibration.refA
         ? 'Place Ref B — or use Ball mode to auto-calibrate'
         : 'Place Ref A + Ref B, or mark balls to auto-calibrate';
       scaleEl.classList.remove('ready');
-      if (resetBtn) resetBtn.style.display = 'none';
+      if (resetBtn) _hide(resetBtn);
     }
   }
 
   const speedEl = document.getElementById('cd-annot-speed');
   if (speedEl) {
     if (ae.speedResult) {
-      speedEl.style.display = 'flex';
+      _show(speedEl, 'flex');
       setText('cd-annot-kmh', ae.speedResult.avgKmh);
       setText('cd-annot-peak', `Peak ${ae.speedResult.maxKmh} km/h · ${ae.speedResult.n} pts`);
     } else {
-      speedEl.style.display = 'none';
+      _hide(speedEl);
     }
   }
 
@@ -2481,13 +2482,13 @@ function _renderPlayersTable(videos) {
     const numCell = n => `<td class="cd-ptable-num${n === 0 ? ' cd-ptable-num--zero' : ''}">${n || '—'}</td>`;
     return `
       <tr>
-        <td class="cd-ptable-name cd-ptable-name--link" onclick="cdOpenPlayerClips(${JSON.stringify(p.name)})">${escHtml(p.name)}</td>
+        <td class="cd-ptable-name cd-ptable-name--link" onclick='cdOpenPlayerClips(${JSON.stringify(p.name)})'>${escHtml(p.name)}</td>
         ${numCell(p.batter)}
         ${numCell(p.bowler)}
         ${numCell(p.allrounder)}
         <td class="cd-ptable-total">${total}</td>
         <td>
-          <button class="cd-ptable-clip-btn" onclick="cdOpenPlayerClips(${JSON.stringify(p.name)})">
+          <button class="cd-ptable-clip-btn" onclick='cdOpenPlayerClips(${JSON.stringify(p.name)})'>
             <svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11">
               <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
             </svg>
