@@ -119,7 +119,25 @@ function adminHeaders() {
   return h;
 }
 
+let _notifLastAt = 0;
+
+function _cdBeep() {
+  try {
+    new Audio('/TakneekWebSound.mp3').play().catch(() => {});
+  } catch (_) {}
+}
+
+function _cdNotify(title, body) {
+  if (Notification.permission !== 'granted') return;
+  const now = Date.now();
+  if (now - _notifLastAt < 5000) return;
+  _notifLastAt = now;
+  _cdBeep();
+  new Notification(title, { body, icon: '/Takneek.svg' });
+}
+
 function cdAuthInit() {
+  if (Notification.permission === 'default') Notification.requestPermission();
   cdConnectSSE();
   cdFetchVideos();
 }
@@ -139,6 +157,7 @@ function cdConnectSSE() {
   }).then(res => {
     if (!res.ok || !res.body) throw new Error(`SSE HTTP ${res.status}`);
     cdStatus('Real-time stream connected', 'ok');
+    _cdBeep();
 
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -162,6 +181,7 @@ function cdConnectSSE() {
             else CD.allVideos[idx] = video;
             cdFilterVideos();
             if (_currentView === 'dashboard') cdRenderDashboard();
+            _cdNotify('New Video', `${video.display_name} — ${video.player_name}`);
           } else if (eventType === 'video-processed') {
             const idx = CD.allVideos.findIndex(v => v.id === video.id);
             if (idx !== -1) CD.allVideos[idx] = video;
@@ -169,6 +189,7 @@ function cdConnectSSE() {
             cdFilterVideos();
             if (_currentView === 'dashboard') cdRenderDashboard();
             cdStatus(`Video processed: ${video.display_name}`, 'ok');
+            _cdNotify('Video Processed', `${video.display_name} is ready`);
           }
         } catch (_) {}
         eventType = 'message';
@@ -431,9 +452,11 @@ const VideoStreamService = (() => {
 
   // Keyed by player_analysis_id — no duplicates
   const _store = new Map();
+  let _prevStoreSize = -1; // -1 = initial load not yet done
 
   function _notify() {
     const items = Array.from(_store.values());
+    const prevSize = _prevStoreSize;
     CD.allVideos = items.map(_mapStreamItem);
     cdFilterVideos();
     if (typeof _currentView !== 'undefined' && _currentView === 'dashboard') {
@@ -441,6 +464,11 @@ const VideoStreamService = (() => {
     }
     const n = CD.allVideos.length;
     cdStatus(`${n} video${n !== 1 ? 's' : ''} in queue`, n > 0 ? 'ok' : '');
+    if (prevSize >= 0 && n > prevSize) {
+      const v = CD.allVideos[0];
+      _cdNotify('New Video', `${v.display_name} — ${v.player_name}`);
+    }
+    _prevStoreSize = n;
   }
 
   function _applyItems(raw) {
@@ -478,6 +506,7 @@ const VideoStreamService = (() => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (!res.body) throw new Error('No response body');
 
+      _cdBeep();
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = '';
@@ -1083,15 +1112,13 @@ function renderAnnPanel() {
   }
 
   if (isBatsman) {
-    const done = clip.annotations.length;
-    progress.textContent = `${done}/${BATSMAN_STAGE_ORDER.length}`;
+    progress.textContent = '';
 
-    // Shot type selector
     const shotOptions = Object.entries(BATSMAN_SHOTS).map(([k, v]) =>
       `<option value="${k}"${clip.shotType === k ? ' selected' : ''}>${escHtml(v)}</option>`
     ).join('');
 
-    const shotSelector = `
+    stagesEl.innerHTML = `
       <div class="cd-shot-selector">
         <label class="cd-shot-label">Shot Type</label>
         <select class="cd-shot-select" onchange="cdSetShotType('${clip.id}', this.value)">
@@ -1099,46 +1126,6 @@ function renderAnnPanel() {
           ${shotOptions}
         </select>
       </div>`;
-
-    // Movement stages
-    const stageRows = BATSMAN_STAGE_ORDER.map((stage, idx) => {
-      const ann     = clip.annotations.find(a => a.stage === stage);
-      const label   = BATSMAN_STAGES[stage];
-      const isRange = BATSMAN_RANGE_STAGES.has(stage);
-      const isDone  = !!ann;
-
-      const pending = clip._pendingRange?.[stage];
-
-      const valueHtml = isDone
-        ? (isRange
-            ? `<span class="cd-srow-val">${ann.frameStart} → ${ann.frameEnd}</span>`
-            : `<span class="cd-srow-val">frame ${ann.frame}</span>`)
-        : pending
-          ? (pending.start !== undefined
-              ? `<span class="cd-srow-val cd-srow-pending">start f${pending.start} — mark end</span>`
-              : `<span class="cd-srow-val cd-srow-pending">end f${pending.end} — mark start</span>`)
-          : '';
-
-      const actionHtml = isDone
-        ? `<button class="cd-srow-redo" onclick="cdClearBatsmanStage('${clip.id}','${stage}')" title="Re-mark">↺</button>`
-        : isRange
-          ? `<button class="cd-srow-mark cd-srow-start" onclick="cdMarkBatsmanStage('${stage}','start')">▶ Start</button>
-             <button class="cd-srow-mark cd-srow-end"   onclick="cdMarkBatsmanStage('${stage}','end')">■ End</button>`
-          : `<button class="cd-srow-mark" onclick="cdMarkBatsmanStage('${stage}','frame')">◆ Mark</button>`;
-
-      return `
-        <div class="cd-srow${isDone ? ' done' : ''}">
-          <div class="cd-srow-left">
-            <span class="cd-srow-num">${idx + 1}</span>
-            <div class="cd-srow-info">
-              <span class="cd-srow-label">${label}</span>${valueHtml}
-            </div>
-          </div>
-          <div class="cd-srow-actions">${actionHtml}</div>
-        </div>`;
-    }).join('');
-
-    stagesEl.innerHTML = shotSelector + stageRows;
   }
 }
 
@@ -2180,8 +2167,8 @@ function cdAnnotDrawCanvas() {
   if (_gridEnabled) {
     const { rx, ry, rw, rh } = _videoRenderBounds();
     _sCtx.save();
-    _sCtx.strokeStyle = 'rgba(255,255,255,0.18)';
-    _sCtx.lineWidth = 0.7;
+    _sCtx.strokeStyle = 'rgba(255,255,255,0.45)';
+    _sCtx.lineWidth = 1.2;
     const cols = 20, rows = 20;
     for (let i = 1; i < cols; i++) {
       const x = rx + (rw / cols) * i;
