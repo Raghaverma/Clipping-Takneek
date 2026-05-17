@@ -4,7 +4,7 @@
 // All cd*/CD globals are referenced from app/page.js (loaded via <Script> tag).
 
 const TAKNEEK_API = 'https://takneek.crik.ai/api/v1';
-const ADMIN_API   = 'https://hierocratical-unbreathing-ma.ngrok-free.dev/api/v1';
+const ADMIN_API   = 'https://takneek-b2c.crik.ai/api/v1';
 
 // R2 metadata upload — fill in your Worker/bucket URL and token
 const R2_METADATA_URL = '';
@@ -111,10 +111,7 @@ function tkHeaders() {
 }
 
 function adminHeaders() {
-  const h = {
-    'Content-Type': 'application/json',
-    'ngrok-skip-browser-warning': 'true',
-  };
+  const h = { 'Content-Type': 'application/json' };
   if (AUTH.token) h['Authorization'] = `Bearer ${AUTH.token}`;
   return h;
 }
@@ -712,8 +709,8 @@ async function cdSelectVideo(id) {
     } else {
       const srcUrl = video.video_processed_url || video.video_url;
       const dlRes = await fetch(
-        `${TAKNEEK_API}/upload/download-url?url=${encodeURIComponent(srcUrl)}`,
-        { headers: tkHeaders() }
+        `${ADMIN_API}/upload/download-url?url=${encodeURIComponent(srcUrl)}`,
+        { headers: adminHeaders() }
       );
       if (!dlRes.ok) throw new Error(`HTTP ${dlRes.status}`);
       const { downloadUrl } = await dlRes.json();
@@ -1430,9 +1427,9 @@ async function cdUploadClips() {
           : clip.label,
         requires_processing: true,
       };
-      const res = await fetch(`${TAKNEEK_API}/academy-players/analysis`, {
+      const res = await fetch(`${ADMIN_API}/players/analysis`, {
         method: 'POST',
-        headers: tkHeaders(),
+        headers: adminHeaders(),
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status} on clip "${clip.label}"`);
@@ -1463,7 +1460,12 @@ function buildMetadata() {
 
   // Top-level ball_speed — easy to find without digging into annotation object
   const topLevelSpeed = ae.speedResult
-    ? { avg_kmh: ae.speedResult.avgKmh, peak_kmh: ae.speedResult.maxKmh, points_used: ae.speedResult.n }
+    ? {
+        avg_kmh: ae.speedResult.avgKmh,
+        peak_kmh: ae.speedResult.maxKmh,
+        ...(ae.speedResult.releaseKmh ? { release_kmh: ae.speedResult.releaseKmh } : {}),
+        points_used: ae.speedResult.n,
+      }
     : null;
 
   return {
@@ -1478,7 +1480,7 @@ function buildMetadata() {
     ...(topLevelSpeed ? { ball_speed: topLevelSpeed } : {}),
     ...(annotationData ? { annotation: annotationData } : {}),
     clips: CD.clips.map((clip, i) => {
-      // Use each clip's own annotEngine state for per-clip ball speed
+
       const clipAe = clip.id === CD.selectedClipId
         ? CD.annotEngine
         : (clip.annotEngineState || null);
@@ -1534,15 +1536,13 @@ function updateUploadBtn() {
   document.getElementById('cd-upload-btn').disabled = CD.clips.length === 0;
 }
 
-// Player Zoom
-// Scroll to zoom · Alt+drag to pan · double-click to reset
 
 function cdZoomOnWheel(e) {
   if (!CD.activeVideo) return;
   e.preventDefault();
 
   const box = document.querySelector('.cd-player-box').getBoundingClientRect();
-  const cx = e.clientX - box.left;   // cursor relative to player box
+  const cx = e.clientX - box.left;  
   const cy = e.clientY - box.top;
   const dir = e.deltaY < 0 ? 1 : -1;
   const next = ZOOM.level * (1 + dir * ZOOM_SPEED);
@@ -1569,7 +1569,6 @@ function cdZoomReset() {
 
 let _zPanning = false, _zPanOrigin = null;
 
-// Start a pan drag (called from annotation mousedown when Alt is held)
 function _zoomStartPan(e) {
   _zPanning = true;
   _zPanOrigin = { x: e.clientX - ZOOM.panX, y: e.clientY - ZOOM.panY };
@@ -1622,6 +1621,7 @@ const _AE_LABELS = { ball: '●', refA: 'A', refB: 'B' };
 const BALL_DIAMETER_M = 0.0735; // 73.5 mm — midpoint of ICC range (72.4–74.8 mm)
 
 let _cropperInstance = null;
+let _pendingCropClick = null; // {vidX, vidY, diamVideoPx} for sub-pixel pre-positioning
 
 function _currentFrame() {
   return Math.floor((videoEl?.currentTime || 0) * CD.fps);
@@ -1733,7 +1733,7 @@ function cdAnnotUpdateModeBtns() {
 let _aeClickStart = null;
 
 function cdAnnotOnMouseDown(e) {
-  // Alt+drag always pans when zoomed, regardless of annotation state
+
   if (e.altKey && ZOOM.level > 1) { e.preventDefault(); _zoomStartPan(e); return; }
 
   if (!CD.annotEngine.active) return;
@@ -1810,17 +1810,7 @@ function _annotHandleClick(nx, ny) {
       cdStatus('Ref B placed' + (ae.calibration.scale ? ` — scale ${(ae.calibration.scale * 1000).toFixed(2)} mm/px` : ' — place Ref A to compute scale'), 'ok');
       break;
     case 'ball': {
-      const locked = ae.calibration.lockedBallScale;
-      if (locked) {
-        const frame = _currentFrame();
-        ae.points.ball[frame] = { x: nx, y: ny, diamNorm: ae.calibration.lockedDiamNorm, ballScale: locked, ballMm: ae.calibration.lockedBallMm };
-        _annotRecompute();
-        cdAnnotRender();
-        cdAnnotDrawCanvas();
-        cdStatus(`Ball f${frame} — scale locked ${(locked * 1000).toFixed(3)} mm/px`, 'ok');
-      } else {
-        cdAnnotOpenBallCrop();
-      }
+      cdAnnotOpenBallCrop(nx, ny);
       return;
     }
     default: return;
@@ -1843,8 +1833,6 @@ function _annotSetPoint(type, frame, nx, ny) {
   }
 }
 
-// Returns the actual rendered video region inside the canvas element,
-// accounting for object-fit:contain letterboxing.
 function _videoRenderBounds() {
   const vw = videoEl.videoWidth || _sCanvas.width;
   const vh = videoEl.videoHeight || _sCanvas.height;
@@ -1854,11 +1842,23 @@ function _videoRenderBounds() {
   return { rx: (cw - rw) / 2, ry: (ch - rh) / 2, rw, rh, vw, vh };
 }
 
-function cdAnnotOpenBallCrop() {
+function cdAnnotOpenBallCrop(clickNx, clickNy) {
   if (!videoEl.videoWidth) { cdStatus('No video loaded', 'err'); return; }
 
   videoEl.pause();
   const frame = _currentFrame();
+
+  // Pre-compute sub-pixel crop position from click coordinates when scale is locked
+  _pendingCropClick = null;
+  const ae = CD.annotEngine;
+  if (clickNx != null && clickNy != null && ae.calibration.lockedBallScale) {
+    const { rx, ry, rw, rh, vw, vh } = _videoRenderBounds();
+    const scaleX = rw / vw, scaleY = rh / vh;
+    const vidX = (_sCanvas.width  * clickNx - rx) / scaleX;
+    const vidY = (_sCanvas.height * clickNy - ry) / scaleY;
+    const diamVideoPx = (ae.calibration.lockedDiamNorm * _sCanvas.width) / scaleX;
+    _pendingCropClick = { vidX, vidY, diamVideoPx };
+  }
 
   // Capture current video frame to a temporary canvas
   const cap = document.createElement('canvas');
@@ -1890,12 +1890,31 @@ function cdAnnotOpenBallCrop() {
       background: false,
       cropBoxMovable: true,
       cropBoxResizable: true,
-      ready() { _updateCropInfo(); },
+      ready() {
+        if (_pendingCropClick) {
+          const { vidX, vidY, diamVideoPx } = _pendingCropClick;
+          _pendingCropClick = null;
+          _cropperInstance.setData({
+            x: Math.max(0, vidX - diamVideoPx / 2),
+            y: Math.max(0, vidY - diamVideoPx / 2),
+            width: diamVideoPx,
+            height: diamVideoPx,
+            rotate: 0, scaleX: 1, scaleY: 1,
+          });
+        }
+        _updateCropInfo();
+      },
       crop() { _updateCropInfo(); },
     });
   };
   img.src = cap.toDataURL('image/jpeg', 0.92);
-  cdStatus(`f${frame} — draw a box tightly around the ball, then click Mark Ball`, 'info');
+  const isLocked = !!ae.calibration.lockedBallScale;
+  cdStatus(
+    isLocked
+      ? `f${frame} — adjust circle if needed, then press Enter or click ✓ Mark Ball`
+      : `f${frame} — draw a box tightly around the ball, then click ✓ Mark Ball`,
+    'info'
+  );
 }
 
 function _updateCropInfo() {
@@ -2113,7 +2132,9 @@ function cdAnnotRender() {
     if (ae.speedResult) {
       _show(speedEl, 'flex');
       setText('cd-annot-kmh', ae.speedResult.avgKmh);
-      setText('cd-annot-peak', `Peak ${ae.speedResult.maxKmh} km/h · ${ae.speedResult.n} pts`);
+      const { releaseKmh, maxKmh, avgKmh, n } = ae.speedResult;
+      const relStr = releaseKmh && releaseKmh > avgKmh ? `Release ~${releaseKmh} km/h · ` : '';
+      setText('cd-annot-peak', `${relStr}Peak ${maxKmh} km/h · ${n} pts`);
     } else {
       _hide(speedEl);
     }
@@ -2268,6 +2289,59 @@ function _movingAvg(arr, w) {
   });
 }
 
+// Bidirectional Kalman smoother for speed values (km/h).
+// Q = process noise (how much speed can change between measurements),
+// R = measurement noise (pixel annotation error converted to km/h).
+function _kalmanSmooth(speeds, Q = 9, R = 25) {
+  if (speeds.length < 2) return [...speeds];
+
+  // Forward pass
+  const fwd = [], fwdP = [];
+  let x = speeds[0], p = R;
+  for (const z of speeds) {
+    p += Q;
+    const K = p / (p + R);
+    x += K * (z - x);
+    p *= (1 - K);
+    fwd.push(x); fwdP.push(p);
+  }
+
+  // Backward pass
+  const bwd = new Array(speeds.length), bwdP = new Array(speeds.length);
+  x = speeds[speeds.length - 1]; p = R;
+  for (let i = speeds.length - 1; i >= 0; i--) {
+    p += Q;
+    const K = p / (p + R);
+    x += K * (speeds[i] - x);
+    p *= (1 - K);
+    bwd[i] = x; bwdP[i] = p;
+  }
+
+  // Combine passes weighted by inverse variance
+  return fwd.map((f, i) => {
+    const pf = fwdP[i], pb = bwdP[i];
+    return (f / pf + bwd[i] / pb) / (1 / pf + 1 / pb);
+  });
+}
+
+// Linear regression of speed vs cumulative distance to back-extrapolate
+// the release speed (at distance = 0). Clamped to [first, first × 1.15]
+// so we never extrapolate more than 15% above the first measured speed.
+function _linearReleaseSpeed(speeds, dists) {
+  const n = speeds.length;
+  if (n < 2) return speeds[0] || 0;
+  const sumD = dists.reduce((a, b) => a + b, 0);
+  const sumV = speeds.reduce((a, b) => a + b, 0);
+  const sumDV = dists.reduce((s, d, i) => s + d * speeds[i], 0);
+  const sumDD = dists.reduce((s, d) => s + d * d, 0);
+  const denom = n * sumDD - sumD * sumD;
+  if (Math.abs(denom) < 1e-10) return sumV / n;
+  const k = (n * sumDV - sumD * sumV) / denom;
+  const v0 = (sumV - k * sumD) / n;
+  const first = speeds[0];
+  return Math.min(Math.max(v0, first), first * 1.15);
+}
+
 function _trimmedMean(arr, p) {
   if (!arr.length) return 0;
   const sorted = [...arr].sort((a, b) => a - b);
@@ -2320,7 +2394,9 @@ function _speedFromBallFrames(frames, points, globalScale, W, H) {
 
   const stabScales = hasBallScale ? _stabiliseScales(frames, points) : null;
 
-  const rawSpeeds = [];
+  // Collect (speed, cumulative distance) pairs together so they stay in sync
+  const segments = [];
+  let cumDist = 0;
   for (let i = 1; i < frames.length; i++) {
     const p1 = points[frames[i - 1]], p2 = points[frames[i]];
     const s1 = stabScales?.[frames[i - 1]], s2 = stabScales?.[frames[i]];
@@ -2328,21 +2404,28 @@ function _speedFromBallFrames(frames, points, globalScale, W, H) {
     if (!segScale) continue;
     const d_m = Math.hypot((p2.x - p1.x) * W, (p2.y - p1.y) * H) * segScale;
     const dt = (frames[i] - frames[i - 1]) / CD.fps;
-    if (dt > 0 && dt <= 1.5) rawSpeeds.push(d_m / dt * 3.6);
+    cumDist += d_m;
+    if (dt > 0 && dt <= 1.5) segments.push({ speed: d_m / dt * 3.6, dist: cumDist });
   }
 
-  const valid = rawSpeeds.filter(v => v >= 5 && v <= 300);
+  const valid = segments.filter(s => s.speed >= 5 && s.speed <= 300);
   if (!valid.length) return null;
 
-  const smoothed = _movingAvg(valid, 3);
+  const speeds = valid.map(s => s.speed);
+  const dists  = valid.map(s => s.dist);
+
+  const smoothed = _kalmanSmooth(speeds);
   const scaleVals = stabScales ? Object.values(stabScales) : [];
   const scaleAvg = scaleVals.length
     ? scaleVals.reduce((s, v) => s + v, 0) / scaleVals.length
     : globalScale;
 
+  const releaseKmh = Math.round(_linearReleaseSpeed(smoothed, dists));
+
   return {
     avgKmh: Math.round(_trimmedMean(smoothed, 0.2)),
     maxKmh: Math.round(Math.max(...smoothed)),
+    releaseKmh: releaseKmh > 0 ? releaseKmh : null,
     smoothed,
     n: frames.length,
     source: hasBallScale ? 'ball-size' : 'ref-points',
@@ -2353,6 +2436,12 @@ function _speedFromBallFrames(frames, points, globalScale, W, H) {
 // Keyboard shortcuts
 function onKeyDown(e) {
   const t = e.target;
+  // Enter always confirms the crop modal, even when focus is inside the diameter input
+  if (e.code === 'Enter' && !document.getElementById('cd-ball-crop-modal')?.classList.contains('is-hidden')) {
+    e.preventDefault();
+    cdAnnotConfirmBallCrop();
+    return;
+  }
   if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
