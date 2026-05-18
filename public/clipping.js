@@ -3,15 +3,11 @@
 // Clipping Dashboard — Application Logic
 // All cd*/CD globals are referenced from app/page.js (loaded via <Script> tag).
 
-const TAKNEEK_API = 'https://takneek.crik.ai/api/v1';
-const ADMIN_API   = 'http://50.16.105.125/api/v1';
-
-// Fill in your Google Cloud OAuth 2.0 client ID
-const GOOGLE_CLIENT_ID = '';
-
-// R2 metadata upload — fill in your Worker/bucket URL and token
-const R2_METADATA_URL = '';
-const R2_METADATA_TOKEN = '';
+const _cfg              = window.__CD_CONFIG__ || {};
+const TAKNEEK_API       = _cfg.takneekApi       || 'https://takneek.crik.ai/api/v1';
+const ADMIN_API         = _cfg.adminApi         || 'http://50.16.105.125/api/v1';
+const R2_METADATA_URL   = _cfg.r2MetadataUrl    || '';
+const R2_METADATA_TOKEN = _cfg.r2MetadataToken  || '';
 
 // Show/hide helpers — replace scattered style.display assignments
 function _show(el, display = 'flex') { if (el) { el.classList.remove('is-hidden'); el.style.display = display; } }
@@ -19,13 +15,7 @@ function _hide(el) { if (el) { el.classList.add('is-hidden'); el.style.display =
 function _showId(id, d) { _show(document.getElementById(id), d); }
 function _hideId(id)    { _hide(document.getElementById(id)); }
 
-const AUTH = {
-  token: null,
-  refreshToken: null,
-  user: null,
-  deviceId: null,
-  sseAbort: null,
-};
+let _sseAbort = null;
 
 const CD = {
   // API data
@@ -109,17 +99,8 @@ const ANGLE_LABELS = {
   other: 'Other',
 };
 
-function tkHeaders() {
-  const h = { 'Content-Type': 'application/json' };
-  if (AUTH.token) h['Authorization'] = `Bearer ${AUTH.token}`;
-  return h;
-}
-
-function adminHeaders() {
-  const h = { 'Content-Type': 'application/json' };
-  if (AUTH.token) h['Authorization'] = `Bearer ${AUTH.token}`;
-  return h;
-}
+function tkHeaders()    { return { 'Content-Type': 'application/json' }; }
+function adminHeaders() { return { 'Content-Type': 'application/json' }; }
 
 let _notifLastAt = 0;
 
@@ -140,97 +121,107 @@ function _cdNotify(title, body) {
 
 function cdAuthInit() {
   if (Notification.permission === 'default') Notification.requestPermission();
-
   const saved = _authLoad();
   if (saved?.token) {
-    AUTH.token = saved.token;
-    AUTH.refreshToken = saved.refreshToken;
-    AUTH.user = saved.user;
+    _AUTH.token = saved.token;
+    _AUTH.user  = saved.user;
     _cdAfterLogin();
     return;
   }
-
-  // No saved session — show login overlay and wire up Google Sign-In
   _showId('cd-login-overlay', 'flex');
-  _cdInitGoogleSignIn();
-}
-
-function _cdInitGoogleSignIn() {
-  if (!GOOGLE_CLIENT_ID) {
-    const el = document.getElementById('cd-login-error');
-    if (el) el.textContent = 'GOOGLE_CLIENT_ID not configured in clipping.js';
-    return;
-  }
-  const tryInit = () => {
-    if (window.google?.accounts?.id) {
-      google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: _cdGoogleCallback });
-      google.accounts.id.renderButton(
-        document.getElementById('cd-google-btn'),
-        { theme: 'outline', size: 'large', text: 'signin_with' }
-      );
-    } else {
-      setTimeout(tryInit, 200);
-    }
-  };
-  tryInit();
-}
-
-async function _cdGoogleCallback(response) {
-  const errEl = document.getElementById('cd-login-error');
-  try {
-    if (errEl) errEl.textContent = 'Signing in…';
-    const res = await fetch(`${ADMIN_API}/auth/google`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ googleToken: response.credential, role: 'ADMIN' }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    AUTH.token = data.token;
-    AUTH.refreshToken = data.refreshToken;
-    AUTH.user = data.user;
-    _authSave({ token: data.token, refreshToken: data.refreshToken, user: data.user });
-    _hideId('cd-login-overlay');
-    if (errEl) errEl.textContent = '';
-    _cdAfterLogin();
-  } catch (err) {
-    if (errEl) errEl.textContent = `Sign-in failed: ${err.message}`;
-  }
 }
 
 function _cdAfterLogin() {
-  const pill = document.getElementById('cd-user-pill');
-  const nameEl = document.getElementById('cd-user-name');
-  if (nameEl && AUTH.user) nameEl.textContent = AUTH.user.name || AUTH.user.email || 'Admin';
-  if (pill) { pill.classList.remove('is-hidden'); pill.style.display = 'flex'; }
+  _hideId('cd-login-overlay');
   cdConnectSSE();
   cdFetchVideos();
 }
 
-function cdLogout() {
-  _authClear();
-  AUTH.token = null; AUTH.refreshToken = null; AUTH.user = null;
-  VideoStreamService.reset();
-  if (AUTH.sseAbort) { AUTH.sseAbort.abort(); AUTH.sseAbort = null; }
-  CD.allVideos = []; cdFilterVideos();
-  _hideId('cd-user-pill');
-  _showId('cd-login-overlay', 'flex');
-  _cdInitGoogleSignIn();
-  cdStatus('Signed out', '');
+async function cdGoogleSignIn() {
+  const btn   = document.getElementById('cd-signin-btn');
+  const errEl = document.getElementById('cd-login-error');
+  if (errEl) errEl.textContent = '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+
+  try {
+    const { verifier, challenge } = await _pkceGenerate();
+    sessionStorage.setItem('_pkce_v', verifier);
+
+    const params = new URLSearchParams({
+      client_id:             GOOGLE_CLIENT_ID,
+      redirect_uri:          `${location.origin}/oauth-callback.html`,
+      response_type:         'code',
+      scope:                 'openid email profile',
+      code_challenge:        challenge,
+      code_challenge_method: 'S256',
+      access_type:           'online',
+      prompt:                'select_account',
+    });
+
+    const popup = window.open(
+      `https://accounts.google.com/o/oauth2/v2/auth?${params}`,
+      'google-oauth',
+      'width=500,height=620,scrollbars=yes,resizable=yes'
+    );
+
+    if (!popup) {
+      if (errEl) errEl.textContent = 'Popup blocked — please allow popups for this page.';
+      if (btn) { btn.disabled = false; btn.innerHTML = _signinBtnHTML(); }
+      return;
+    }
+
+    const code = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Sign-in timed out')), 120_000);
+      window.addEventListener('message', function handler(e) {
+        if (e.origin !== location.origin || e.data?.type !== 'oauth-callback') return;
+        clearTimeout(timer);
+        window.removeEventListener('message', handler);
+        if (e.data.error) reject(new Error(e.data.error));
+        else resolve(e.data.code);
+      });
+    });
+
+    if (btn) btn.textContent = 'Signing in…';
+
+    const res = await fetch('/api/auth/google', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ code, codeVerifier: verifier }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    _AUTH.token = data.token;
+    _AUTH.user  = data.user;
+    _authSave({ token: data.token, user: data.user });
+    _cdAfterLogin();
+  } catch (err) {
+    if (errEl) errEl.textContent = err.message;
+    if (btn) { btn.disabled = false; btn.innerHTML = _signinBtnHTML(); }
+  }
 }
 
+function _signinBtnHTML() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="18" height="18" style="flex-shrink:0"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Sign in with Google`;
+}
+
+async function _pkceGenerate() {
+  const array   = crypto.getRandomValues(new Uint8Array(32));
+  const verifier = btoa(String.fromCharCode(...array)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const digest  = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return { verifier, challenge };
+}
+
+const _AUTH = { token: null, user: null };
 function _authSave(data) { try { localStorage.setItem('cd_auth', JSON.stringify(data)); } catch {} }
 function _authLoad()     { try { return JSON.parse(localStorage.getItem('cd_auth')); } catch { return null; } }
-function _authClear()    { try { localStorage.removeItem('cd_auth'); } catch {} }
 
-// Uses fetch() so we can send Authorization + ngrok headers
-// (EventSource doesn't support custom headers)
 function cdConnectSSE() {
-  if (AUTH.sseAbort) { AUTH.sseAbort.abort(); AUTH.sseAbort = null; }
-  if (!AUTH.token) return;
+  if (_sseAbort) { _sseAbort.abort(); _sseAbort = null; }
 
-  AUTH.sseAbort = new AbortController();
-  const signal = AUTH.sseAbort.signal;
+  _sseAbort = new AbortController();
+  const signal = _sseAbort.signal;
 
   fetch(`${ADMIN_API}/admin/stream`, {
     headers: adminHeaders(),
@@ -297,8 +288,8 @@ function cdConnectSSE() {
 
 function _sseReconnect() {
   cdStatus('SSE stream disconnected — retrying in 8s', 'err');
-  AUTH.sseAbort = null;
-  setTimeout(() => { if (AUTH.token) cdConnectSSE(); }, 8000);
+  _sseAbort = null;
+  setTimeout(cdConnectSSE, 8000);
 }
 
 function _mapStreamItem(item) {
@@ -567,7 +558,7 @@ const VideoStreamService = (() => {
     try { return JSON.parse(text); } catch { return null; }
   }
 
-  function connect(token) {
+  function connect() {
     disconnect();
 
     _abort = new AbortController();
@@ -609,13 +600,13 @@ const VideoStreamService = (() => {
 
           pump();
         }).catch(() => {
-          if (!signal.aborted) _scheduleRetry(token);
+          if (!signal.aborted) _scheduleRetry();
         });
       }
 
       pump();
     }).catch(() => {
-      if (!signal.aborted) _scheduleRetry(token);
+      if (!signal.aborted) _scheduleRetry();
     });
   }
 
@@ -624,11 +615,9 @@ const VideoStreamService = (() => {
     if (_abort) { _abort.abort(); _abort = null; }
   }
 
-  function _scheduleRetry(token) {
+  function _scheduleRetry() {
     cdStatus('Stream disconnected — retrying…', 'err');
-    _retryTimer = setTimeout(() => {
-      if (AUTH.token) connect(token);
-    }, RETRY_DELAY);
+    _retryTimer = setTimeout(connect, RETRY_DELAY);
   }
 
   function reset() {
@@ -641,7 +630,7 @@ const VideoStreamService = (() => {
 
 // Public entry points wired to buttons / auth
 function cdFetchVideos() {
-  VideoStreamService.connect(AUTH.token);
+  VideoStreamService.connect();
 }
 
 function cdFilterVideos() {
@@ -1451,8 +1440,6 @@ async function cdUploadClips() {
     };
 
     try {
-      console.log('[Upload] AUTH.token:', AUTH.token ? AUTH.token.slice(0, 30) + '…' : 'NULL');
-      console.log('[Upload] headers:', adminHeaders());
       const res = await fetch(`${ADMIN_API}/video-processing/admin-payload`, {
         method: 'POST',
         headers: adminHeaders(),
