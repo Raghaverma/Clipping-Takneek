@@ -8,7 +8,6 @@ export async function GET(req) {
     headers: {
       'Authorization':              auth,
       'Content-Type':               'application/json',
-      'ngrok-skip-browser-warning': '1',
     },
   });
 

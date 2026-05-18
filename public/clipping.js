@@ -5,9 +5,10 @@
 
 const _cfg              = window.__CD_CONFIG__ || {};
 const TAKNEEK_API       = _cfg.takneekApi       || 'https://takneek.crik.ai/api/v1';
-const ADMIN_API         = _cfg.adminApi         || 'http://50.16.105.125/api/v1';
+const ADMIN_API         = _cfg.adminApi         || 'http://takneek-b2c.crik.ai/api/v1';
 const R2_METADATA_URL   = _cfg.r2MetadataUrl    || '';
 const R2_METADATA_TOKEN = _cfg.r2MetadataToken  || '';
+const GOOGLE_CLIENT_ID  = _cfg.googleClientId   || '';
 
 // Show/hide helpers — replace scattered style.display assignments
 function _show(el, display = 'flex') { if (el) { el.classList.remove('is-hidden'); el.style.display = display; } }
@@ -100,7 +101,7 @@ const ANGLE_LABELS = {
 };
 
 function tkHeaders()    { const h = { 'Content-Type': 'application/json' }; if (_AUTH.token) h['Authorization'] = `Bearer ${_AUTH.token}`; return h; }
-function adminHeaders() { const h = { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' }; if (_AUTH.token) h['Authorization'] = `Bearer ${_AUTH.token}`; return h; }
+function adminHeaders() { const h = { 'Content-Type': 'application/json' }; if (_AUTH.token) h['Authorization'] = `Bearer ${_AUTH.token}`; return h; }
 
 let _notifLastAt = 0;
 
@@ -223,7 +224,7 @@ function cdConnectSSE() {
   _sseAbort = new AbortController();
   const signal = _sseAbort.signal;
 
-  fetch('/api/stream/admin', {
+  fetch(`${ADMIN_API}/admin/stream`, {
     headers: adminHeaders(),
     signal,
   }).then(res => {
@@ -564,7 +565,7 @@ const VideoStreamService = (() => {
     _abort = new AbortController();
     const { signal } = _abort;
 
-    fetch('/api/stream/videos', {
+    fetch(`${ADMIN_API}/video-processing/stream`, {
       headers: adminHeaders(),
       signal,
     }).then(res => {
