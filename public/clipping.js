@@ -99,8 +99,8 @@ const ANGLE_LABELS = {
   other: 'Other',
 };
 
-function tkHeaders()    { return { 'Content-Type': 'application/json' }; }
-function adminHeaders() { return { 'Content-Type': 'application/json' }; }
+function tkHeaders()    { const h = { 'Content-Type': 'application/json' }; if (_AUTH.token) h['Authorization'] = `Bearer ${_AUTH.token}`; return h; }
+function adminHeaders() { const h = { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' }; if (_AUTH.token) h['Authorization'] = `Bearer ${_AUTH.token}`; return h; }
 
 let _notifLastAt = 0;
 
@@ -223,7 +223,7 @@ function cdConnectSSE() {
   _sseAbort = new AbortController();
   const signal = _sseAbort.signal;
 
-  fetch(`${ADMIN_API}/admin/stream`, {
+  fetch('/api/stream/admin', {
     headers: adminHeaders(),
     signal,
   }).then(res => {
@@ -564,7 +564,7 @@ const VideoStreamService = (() => {
     _abort = new AbortController();
     const { signal } = _abort;
 
-    fetch(`${ADMIN_API}/video-processing/stream`, {
+    fetch('/api/stream/videos', {
       headers: adminHeaders(),
       signal,
     }).then(res => {
@@ -782,7 +782,7 @@ async function cdSelectVideo(id) {
     } else {
       const srcUrl = video.video_processed_url || video.video_url;
       const dlRes = await fetch(
-        `${ADMIN_API}/upload/download-url?url=${encodeURIComponent(srcUrl)}`,
+        `/api/proxy/upload/download-url?url=${encodeURIComponent(srcUrl)}`,
         { headers: adminHeaders() }
       );
       if (!dlRes.ok) throw new Error(`HTTP ${dlRes.status}`);
@@ -1435,12 +1435,13 @@ async function cdUploadClips() {
       playerName:  meta.playerName,
       angle:       meta.angle,
       category:    meta.category,
+      totalClips:  meta.totalClips,
       ...(meta.annotation ? { annotation: meta.annotation } : {}),
       clips:       meta.clips,
     };
 
     try {
-      const res = await fetch(`${ADMIN_API}/video-processing/admin-payload`, {
+      const res = await fetch('/api/proxy/video-processing/admin-payload', {
         method: 'POST',
         headers: adminHeaders(),
         body: JSON.stringify(body),
@@ -1498,7 +1499,7 @@ async function cdUploadClips() {
           : clip.label,
         requires_processing: true,
       };
-      const res = await fetch(`${ADMIN_API}/players/analysis`, {
+      const res = await fetch('/api/proxy/players/analysis', {
         method: 'POST',
         headers: adminHeaders(),
         body: JSON.stringify(body),
