@@ -23,6 +23,7 @@ export default function RootLayout({ children }) {
           src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"
           strategy="afterInteractive"
         />
+        <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
         <Script src="/clipping.js" strategy="afterInteractive" />
       </body>
     </html>

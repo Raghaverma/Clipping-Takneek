@@ -4,7 +4,10 @@
 // All cd*/CD globals are referenced from app/page.js (loaded via <Script> tag).
 
 const TAKNEEK_API = 'https://takneek.crik.ai/api/v1';
-const ADMIN_API   = 'https://takneek-b2c.crik.ai/api/v1';
+const ADMIN_API   = 'http://50.16.105.125/api/v1';
+
+// Fill in your Google Cloud OAuth 2.0 client ID
+const GOOGLE_CLIENT_ID = '';
 
 // R2 metadata upload — fill in your Worker/bucket URL and token
 const R2_METADATA_URL = '';
@@ -18,6 +21,8 @@ function _hideId(id)    { _hide(document.getElementById(id)); }
 
 const AUTH = {
   token: null,
+  refreshToken: null,
+  user: null,
   deviceId: null,
   sseAbort: null,
 };
@@ -135,9 +140,88 @@ function _cdNotify(title, body) {
 
 function cdAuthInit() {
   if (Notification.permission === 'default') Notification.requestPermission();
+
+  const saved = _authLoad();
+  if (saved?.token) {
+    AUTH.token = saved.token;
+    AUTH.refreshToken = saved.refreshToken;
+    AUTH.user = saved.user;
+    _cdAfterLogin();
+    return;
+  }
+
+  // No saved session — show login overlay and wire up Google Sign-In
+  _showId('cd-login-overlay', 'flex');
+  _cdInitGoogleSignIn();
+}
+
+function _cdInitGoogleSignIn() {
+  if (!GOOGLE_CLIENT_ID) {
+    const el = document.getElementById('cd-login-error');
+    if (el) el.textContent = 'GOOGLE_CLIENT_ID not configured in clipping.js';
+    return;
+  }
+  const tryInit = () => {
+    if (window.google?.accounts?.id) {
+      google.accounts.id.initialize({ client_id: GOOGLE_CLIENT_ID, callback: _cdGoogleCallback });
+      google.accounts.id.renderButton(
+        document.getElementById('cd-google-btn'),
+        { theme: 'outline', size: 'large', text: 'signin_with' }
+      );
+    } else {
+      setTimeout(tryInit, 200);
+    }
+  };
+  tryInit();
+}
+
+async function _cdGoogleCallback(response) {
+  const errEl = document.getElementById('cd-login-error');
+  try {
+    if (errEl) errEl.textContent = 'Signing in…';
+    const res = await fetch(`${ADMIN_API}/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ googleToken: response.credential, role: 'ADMIN' }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    AUTH.token = data.token;
+    AUTH.refreshToken = data.refreshToken;
+    AUTH.user = data.user;
+    _authSave({ token: data.token, refreshToken: data.refreshToken, user: data.user });
+    _hideId('cd-login-overlay');
+    if (errEl) errEl.textContent = '';
+    _cdAfterLogin();
+  } catch (err) {
+    if (errEl) errEl.textContent = `Sign-in failed: ${err.message}`;
+  }
+}
+
+function _cdAfterLogin() {
+  const pill = document.getElementById('cd-user-pill');
+  const nameEl = document.getElementById('cd-user-name');
+  if (nameEl && AUTH.user) nameEl.textContent = AUTH.user.name || AUTH.user.email || 'Admin';
+  if (pill) { pill.classList.remove('is-hidden'); pill.style.display = 'flex'; }
   cdConnectSSE();
   cdFetchVideos();
 }
+
+function cdLogout() {
+  _authClear();
+  AUTH.token = null; AUTH.refreshToken = null; AUTH.user = null;
+  VideoStreamService.reset();
+  if (AUTH.sseAbort) { AUTH.sseAbort.abort(); AUTH.sseAbort = null; }
+  CD.allVideos = []; cdFilterVideos();
+  _hideId('cd-user-pill');
+  _showId('cd-login-overlay', 'flex');
+  _cdInitGoogleSignIn();
+  cdStatus('Signed out', '');
+}
+
+function _authSave(data) { try { localStorage.setItem('cd_auth', JSON.stringify(data)); } catch {} }
+function _authLoad()     { try { return JSON.parse(localStorage.getItem('cd_auth')); } catch { return null; } }
+function _authClear()    { try { localStorage.removeItem('cd_auth'); } catch {} }
 
 // Uses fetch() so we can send Authorization + ngrok headers
 // (EventSource doesn't support custom headers)
