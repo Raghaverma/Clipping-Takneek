@@ -1534,9 +1534,9 @@ function buildMetadata() {
   // Top-level ball_speed — easy to find without digging into annotation object
   const topLevelSpeed = ae.speedResult
     ? {
-        avg_kmh: ae.speedResult.avgKmh,
-        peak_kmh: ae.speedResult.maxKmh,
-        ...(ae.speedResult.releaseKmh ? { release_kmh: ae.speedResult.releaseKmh } : {}),
+        avg_kmh: String(ae.speedResult.avgKmh),
+        peak_kmh: String(ae.speedResult.maxKmh),
+        ...(ae.speedResult.releaseKmh ? { release_kmh: String(ae.speedResult.releaseKmh) } : {}),
         points_used: ae.speedResult.n,
       }
     : null;
