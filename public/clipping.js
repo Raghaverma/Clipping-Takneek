@@ -764,6 +764,7 @@ function _itemIcon(status, streamable) {
 function renderVideoList() {
   const list = document.getElementById('cd-video-list');
   const label = document.getElementById('cd-video-count-label');
+  if (!list || !label) return;
 
   const total = CD.allVideos.length;
   const filtered = CD.filteredVideos.length;

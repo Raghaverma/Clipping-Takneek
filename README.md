@@ -1,12 +1,12 @@
 # Takneek Dashboard
 
-A single-page cricket video clipping and analysis tool built for the Takneek / Khel.ai platform. It lets admins browse, clip, annotate, and export cricket footage — measuring ball speed, marking bowling stages, and uploading structured metadata back to the API.
+A cricket video clipping and analysis tool built for the Takneek / Khel.ai platform. Lets admins browse, clip, annotate, and export cricket footage — measuring ball speed, marking bowling stages, and uploading structured metadata back to the API.
 
 ---
 
 ## What It Does
 
-### Overview Dashboard
+### Overview Dashboard (`/overview`)
 The default landing view shows aggregate stats across all videos in the system:
 
 - Total video count, broken down by **Batter**, **Bowler**, and **All-Rounder**
@@ -17,12 +17,12 @@ The default landing view shows aggregate stats across all videos in the system:
 
 A real-time SSE (Server-Sent Events) stream keeps the dashboard live — new videos and processing completions appear without a manual refresh.
 
-### Clipping View
+### Clipping View (`/clipping`, `/clipping/[id]`)
 A three-column layout for working with individual videos:
 
 **Left — Video Browser**
 - Lists all videos fetched from the Takneek API
-- Filter by player name / video title (search box) and by analysis type (Batter / Bowler / All-Rounder)
+- Filter by player name / video title and by analysis type (Batter / Bowler / All-Rounder)
 - Toggle between Batsman and Bowler category tabs
 
 **Center — Video Player**
@@ -30,13 +30,13 @@ A three-column layout for working with individual videos:
 - Custom seek bar with buffer indicator and per-frame tooltip
 - Frame-by-frame stepping (← →), 10-frame jumps (↑ ↓), jump to percentage (1–9 keys)
 - Playback speed: 0.1×, 0.25×, 0.5×, 1×, 1.5×, 2×
-- Scroll-wheel / +- key zoom with Alt+drag pan; double-click resets zoom
+- Scroll-wheel / +/- key zoom with Alt+drag pan; double-click resets zoom
 - Set **Start (I)** and **End (O)** in/out points, then **Add Clip (A)**
 
 **Right — Clips & Annotation**
-- List of created clips with preview playback (clips are cut client-side via the MediaSource / blob approach)
-- **Ball Speed Annotation Engine** — place calibration markers (Ref A, Ref B) at a known real-world distance, then click ball positions across frames; the tool computes average and peak speed in km/h using a CropperJS crop modal for precision
-- **Bowling Stage Marker** — mark six phases per clip: Run Up, Back Foot Contact (BFC), Delivery Stride, Front Foot Landing (FFC), Ball Release, Follow Through. Some stages are frame ranges, others single frames
+- List of created clips with preview playback
+- **Ball Speed Annotation Engine** — place calibration markers (Ref A, Ref B) at a known real-world distance, then click ball positions across frames; computes average and peak speed in km/h using a CropperJS crop modal for precision
+- **Bowling Stage Marker** — mark six phases per clip: Run Up, Back Foot Contact (BFC), Delivery Stride, Front Foot Landing (FFC), Ball Release, Follow Through
 - **Export Data** — downloads clip metadata as JSON
 - **Upload** — posts structured clip data to the configured R2 worker endpoint
 
@@ -46,11 +46,12 @@ A three-column layout for working with individual videos:
 
 | Layer | Technology |
 |---|---|
-| UI | Vanilla HTML / CSS / JS (no build step, no framework) |
-| Styling | CSS custom properties (`clipping.css`) |
+| Framework | [Next.js 15](https://nextjs.org/) (App Router) |
+| UI | React 19 + Vanilla JS (`public/clipping.js`) |
+| Styling | CSS custom properties (`app/globals.css`) |
 | Crop modal | [CropperJS 1.6.2](https://github.com/fengyuanchen/cropperjs) (CDN) |
-| Auth | JWT stored in `localStorage`, sent as `Bearer` header |
-| Real-time | Custom SSE consumer over `fetch()` (supports auth headers, unlike `EventSource`) |
+| Auth | Google OAuth 2.0 + JWT in `localStorage` |
+| Real-time | Custom SSE consumer over `fetch()` (supports auth headers) |
 | Video sources | Remote (Takneek API streaming URLs) + local file blobs |
 
 ---
@@ -58,65 +59,67 @@ A three-column layout for working with individual videos:
 ## Project Structure
 
 ```
-Takneek Web/
-├── index.html      # Full single-page app markup (dashboard + clipping views, auth overlay, modals)
-├── clipping.js     # All application logic (auth, API calls, video player, clipping, annotation engine)
-└── clipping.css    # Design system + component styles
+app/
+├── layout.js                    # Root layout — injects __CD_CONFIG__ + loads clipping.js
+├── page.js                      # Redirects / → /overview
+├── globals.css                  # Design system + component styles
+├── not-found.js                 # 404 page
+├── overview/
+│   └── page.js                  # Dashboard view
+├── clipping/
+│   ├── page.js                  # Clipping view (no pre-selected video)
+│   └── [id]/page.js             # Clipping view with a specific video pre-loaded
+├── components/
+│   ├── AppShell.js              # Header, nav, auth overlay, modals
+│   └── ClippingView.js          # Three-column clipping layout (mounts clipping.js DOM)
+└── api/
+    ├── auth/google/route.js     # Google OAuth callback handler
+    ├── proxy/[...path]/route.js # API proxy (forwards requests to backend)
+    ├── stream/admin/route.js    # SSE stream — admin events
+    └── stream/videos/route.js  # SSE stream — video updates
+
+public/
+└── clipping.js                  # All clipping/annotation/player logic (vanilla JS, loaded via <Script>)
 ```
 
 ---
 
 ## Configuration
 
-Open `clipping.js` and set the two API constants at the top:
+Create a `.env.local` file in the project root:
 
-```js
-const TAKNEEK_API = 'https://takneek.crik.ai/api/v1';   // video library API
-const ADMIN_API   = 'https://<your-ngrok-or-server>/api/v1'; // admin auth + SSE stream
+```bash
+NEXT_PUBLIC_TAKNEEK_API=https://takneek.crik.ai/api/v1
+NEXT_PUBLIC_ADMIN_API=https://takneek-b2c.crik.ai/api/v1
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id
+NEXT_PUBLIC_R2_METADATA_URL=https://your-worker.workers.dev/metadata
+NEXT_PUBLIC_R2_METADATA_TOKEN=your-bearer-token
 ```
 
-To enable clip uploads, also fill in:
-
-```js
-const R2_METADATA_URL   = 'https://your-worker.workers.dev/metadata';
-const R2_METADATA_TOKEN = 'your-bearer-token';
-```
+These are injected into `window.__CD_CONFIG__` at runtime by `app/layout.js` and consumed by `public/clipping.js`.
 
 ---
 
-## How to Launch
-
-This is a static app — no install, no build step.
-
-**Option 1 — Open directly in a browser**
-```
-double-click index.html
-```
-> Works for local video files. Remote API calls may be blocked by CORS if opened as `file://` — use option 2 in that case.
-
-**Option 2 — Serve with any static file server**
-```bash
-# Python (built-in)
-cd "Takneek Web"
-python3 -m http.server 8080
-# then open http://localhost:8080
-```
+## Getting Started
 
 ```bash
-# Node (npx, no install needed)
-npx serve "Takneek Web"
+npm install
+npm run dev
+# open http://localhost:3000
 ```
 
+**Production build:**
 ```bash
-# VS Code — install the "Live Server" extension, right-click index.html → Open with Live Server
+npm run build
+npm start
 ```
 
 ---
 
 ## Authentication Flow
 
-1. On first load, an auth overlay appears.
-2. **Sign In** with your Takneek admin email + password, or **Sign Up** (name, email, Indian phone number, password).
+1. On first load, a login overlay appears.
+2. Sign in with **Google OAuth** (Google account linked to your Takneek admin profile).
 3. The JWT is saved to `localStorage` and reused across sessions — no re-login needed until you sign out.
 4. The SSE stream connects automatically after login and pushes live video updates.
 5. Click **Sign out** in the top bar to clear the token and return to the login screen.
