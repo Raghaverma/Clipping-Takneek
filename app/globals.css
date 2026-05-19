@@ -1607,10 +1607,10 @@ input, select {
 
 /* Clips list */
 .cd-clips-scroll {
-  flex: 1;
+  flex: 0 1 38%;
   overflow-y: auto;
   padding: 0 10px 8px;
-  min-height: 0;
+  min-height: 60px;
   display: flex;
   flex-direction: column;
 }
@@ -1855,7 +1855,6 @@ input, select {
 
 /* ── Annotation panel ────────────────────────────────────── */
 .cd-ann-panel {
-  border-top: 1px solid var(--border);
   flex-shrink: 0;
   display: none;
 }
@@ -2206,6 +2205,8 @@ input, select {
 .cd-view-tab:hover:not(.active) {
   color: var(--text-primary);
 }
+
+a.cd-view-tab { text-decoration: none; }
 
 /* Clipping view wrapper — matches the body flex column */
 .cd-clipping-view {
@@ -2619,9 +2620,53 @@ input, select {
   color: #7c3aed !important;
 }
 
+/* Analysis section — tabbed container */
+.cd-analysis-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+
+.cd-analysis-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 7px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+}
+
+.cd-analysis-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: var(--radius-md);
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: all var(--transition);
+}
+.cd-analysis-tab:hover { color: var(--text-primary); background: var(--bg-elevated); }
+.cd-analysis-tab.active { color: var(--accent); background: var(--accent-muted); }
+#cd-tab-ballspeed.active { color: #7c3aed; background: rgba(124,58,237,0.10); }
+
+.cd-analysis-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Panel container */
 .cd-annot-panel {
-  border-top: 1px solid var(--border);
   flex-shrink: 0;
   flex-direction: column;
   background: var(--bg-surface);

@@ -48,7 +48,7 @@ const CD = {
     calibration: {
       refA: null,   // {x,y} normalised
       refB: null,
-      distance_m: 0.45,   // real-world distance between refA and refB (metres)
+      distance_m: 1.22,   // real-world distance between refA and refB (metres)
       scale: null,   // metres per canvas-pixel (computed)
     },
     drag: null,    // {type, frame, ...} while dragging a point
@@ -135,7 +135,7 @@ function cdAuthInit() {
 function _cdAfterLogin() {
   _hideId('cd-login-overlay');
   cdConnectSSE();
-  cdFetchVideos();
+  _startVideoPoll();
 }
 
 async function cdGoogleSignIn() {
@@ -218,6 +218,27 @@ const _AUTH = { token: null, user: null };
 function _authSave(data) { try { localStorage.setItem('cd_auth', JSON.stringify(data)); } catch {} }
 function _authLoad()     { try { return JSON.parse(localStorage.getItem('cd_auth')); } catch { return null; } }
 
+function _saveClipsDraft() {
+  if (!CD.activeVideo || String(CD.activeVideo.id).startsWith('local-')) return;
+  try {
+    localStorage.setItem('cd_clips_draft', JSON.stringify({
+      videoId: CD.activeVideo.id,
+      clips: CD.clips,
+      clipCounter: CD.clipCounter,
+      annCounter: CD.annCounter,
+      sessionId: CD.sessionId,
+    }));
+  } catch {}
+}
+function _clearClipsDraft() { try { localStorage.removeItem('cd_clips_draft'); } catch {} }
+function _loadClipsDraft(videoId) {
+  try {
+    const d = JSON.parse(localStorage.getItem('cd_clips_draft'));
+    if (d && d.videoId === videoId && Array.isArray(d.clips) && d.clips.length > 0) return d;
+  } catch {}
+  return null;
+}
+
 function cdConnectSSE() {
   if (_sseAbort) { _sseAbort.abort(); _sseAbort = null; }
 
@@ -230,7 +251,6 @@ function cdConnectSSE() {
   }).then(res => {
     if (!res.ok || !res.body) throw new Error(`SSE HTTP ${res.status}`);
     cdStatus('Real-time stream connected', 'ok');
-    _cdBeep();
 
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -417,53 +437,64 @@ const ZOOM = { level: 1, panX: 0, panY: 0 };
 const ZOOM_MIN = 1, ZOOM_MAX = 12, ZOOM_SPEED = 0.12;
 
 function _cdDomInit() {
-  videoEl = document.getElementById('cd-video');
-  videoEl.crossOrigin = 'anonymous';
-  seekWrap = document.getElementById('cd-seekbar-wrap');
-  seekTrack = document.getElementById('cd-seek-track');
-  seekFill = document.getElementById('cd-seek-fill');
-  seekBuffer = document.getElementById('cd-seek-buffer');
-  seekThumb = document.getElementById('cd-seek-thumb');
-  seekLayers = document.getElementById('cd-seek-layers');
-  seekTooltip = document.getElementById('cd-seek-tooltip');
-  timeCur = document.getElementById('cd-time-cur');
-  timeDur = document.getElementById('cd-time-dur');
-  playBtn = document.getElementById('cd-play-btn');
-  muteBtn = document.getElementById('cd-mute-btn');
   statusBar = document.getElementById('cd-statusbar');
 
-  // Annotation engine canvas
-  _sCanvas = document.getElementById('cd-speed-canvas');
-  _sCtx = _sCanvas.getContext('2d');
-  _sCanvas.addEventListener('mousedown', cdAnnotOnMouseDown);
-  _sCanvas.addEventListener('mousemove', cdAnnotOnMouseMove);
-  _sCanvas.addEventListener('mouseup', cdAnnotOnMouseUp);
-  window.addEventListener('resize', cdAnnotResizeCanvas);
+  videoEl = document.getElementById('cd-video');
+  if (videoEl) {
+    videoEl.crossOrigin = 'anonymous';
+    seekWrap    = document.getElementById('cd-seekbar-wrap');
+    seekTrack   = document.getElementById('cd-seek-track');
+    seekFill    = document.getElementById('cd-seek-fill');
+    seekBuffer  = document.getElementById('cd-seek-buffer');
+    seekThumb   = document.getElementById('cd-seek-thumb');
+    seekLayers  = document.getElementById('cd-seek-layers');
+    seekTooltip = document.getElementById('cd-seek-tooltip');
+    timeCur     = document.getElementById('cd-time-cur');
+    timeDur     = document.getElementById('cd-time-dur');
+    playBtn     = document.getElementById('cd-play-btn');
+    muteBtn     = document.getElementById('cd-mute-btn');
 
-  // Player zoom
-  const _playerBox = document.querySelector('.cd-player-box');
-  if (_playerBox) {
-    _playerBox.addEventListener('wheel', cdZoomOnWheel, { passive: false });
-    _playerBox.addEventListener('dblclick', cdZoomReset);
+    // Annotation engine canvas
+    _sCanvas = document.getElementById('cd-speed-canvas');
+    _sCtx = _sCanvas.getContext('2d');
+    _sCanvas.addEventListener('mousedown', cdAnnotOnMouseDown);
+    _sCanvas.addEventListener('mousemove', cdAnnotOnMouseMove);
+    _sCanvas.addEventListener('mouseup', cdAnnotOnMouseUp);
+    window.addEventListener('resize', cdAnnotResizeCanvas);
+
+    // Player zoom
+    const _playerBox = document.querySelector('.cd-player-box');
+    if (_playerBox) {
+      _playerBox.addEventListener('wheel', cdZoomOnWheel, { passive: false });
+      _playerBox.addEventListener('dblclick', cdZoomReset);
+    }
+
+    // Video events
+    videoEl.addEventListener('timeupdate', onTimeUpdate);
+    videoEl.addEventListener('timeupdate', _annotOnTimeUpdate);
+    videoEl.addEventListener('loadedmetadata', onVideoLoaded);
+    videoEl.addEventListener('progress', onProgress);
+    videoEl.addEventListener('play', () => syncPlayBtn(true));
+    videoEl.addEventListener('pause', () => syncPlayBtn(false));
+    videoEl.addEventListener('ended', () => syncPlayBtn(false));
+    videoEl.addEventListener('error', onVideoError);
+
+    // Seek bar
+    seekWrap.addEventListener('mousedown', onSeekDown);
+    seekWrap.addEventListener('mousemove', onSeekHover);
+    seekWrap.addEventListener('mouseleave', () => { seekTooltip.style.opacity = '0'; });
+
+    // Keyboard
+    document.addEventListener('keydown', onKeyDown);
+
+    // Auto-select video from URL (e.g. /clipping/VIDEO_ID)
+    const _clippingEl = document.getElementById('cd-clipping-view');
+    if (_clippingEl?.dataset?.videoId) _pendingVideoId = _clippingEl.dataset.videoId;
+
+    // Pre-fill search from ?search= param (set by cdOpenPlayerClips)
+    const _sq = new URLSearchParams(location.search).get('search');
+    if (_sq) { const s = document.getElementById('cd-search-input'); if (s) s.value = _sq; }
   }
-
-  // Video events
-  videoEl.addEventListener('timeupdate', onTimeUpdate);
-  videoEl.addEventListener('timeupdate', _annotOnTimeUpdate);
-  videoEl.addEventListener('loadedmetadata', onVideoLoaded);
-  videoEl.addEventListener('progress', onProgress);
-  videoEl.addEventListener('play', () => syncPlayBtn(true));
-  videoEl.addEventListener('pause', () => syncPlayBtn(false));
-  videoEl.addEventListener('ended', () => syncPlayBtn(false));
-  videoEl.addEventListener('error', onVideoError);
-
-  // Seek bar
-  seekWrap.addEventListener('mousedown', onSeekDown);
-  seekWrap.addEventListener('mousemove', onSeekHover);
-  seekWrap.addEventListener('mouseleave', () => { seekTooltip.style.opacity = '0'; });
-
-  // Keyboard
-  document.addEventListener('keydown', onKeyDown);
 
   // Auth init — shows login overlay or connects with saved token
   cdAuthInit();
@@ -525,11 +556,10 @@ const VideoStreamService = (() => {
 
   // Keyed by player_analysis_id — no duplicates
   const _store = new Map();
-  let _prevStoreSize = -1; // -1 = initial load not yet done
+  const _seenIds = new Set(); // tracks all IDs ever received; survives reconnects
 
-  function _notify() {
+  function _notify(hasNewVideo = false) {
     const items = Array.from(_store.values());
-    const prevSize = _prevStoreSize;
     CD.allVideos = items.map(_mapStreamItem);
     cdFilterVideos();
     if (typeof _currentView !== 'undefined' && _currentView === 'dashboard') {
@@ -537,11 +567,10 @@ const VideoStreamService = (() => {
     }
     const n = CD.allVideos.length;
     cdStatus(`${n} video${n !== 1 ? 's' : ''} in queue`, n > 0 ? 'ok' : '');
-    if (prevSize >= 0 && n > prevSize) {
+    if (hasNewVideo) {
       const v = CD.allVideos[0];
       _cdNotify('New Video', `${v.display_name} — ${v.player_name}`);
     }
-    _prevStoreSize = n;
   }
 
   function _applyItems(raw) {
@@ -549,10 +578,17 @@ const VideoStreamService = (() => {
       : Array.isArray(raw?.data) ? raw.data
       : null;
     if (!arr) return false;
+    let hasNew = false;
     arr.forEach(item => {
-      if (item?.player_analysis_id) _store.set(item.player_analysis_id, item);
+      if (item?.player_analysis_id) {
+        if (!_seenIds.has(item.player_analysis_id)) {
+          hasNew = true;
+          _seenIds.add(item.player_analysis_id);
+        }
+        _store.set(item.player_analysis_id, item);
+      }
     });
-    return true;
+    return hasNew ? 'new' : true;
   }
 
   function _parseMessage(text) {
@@ -579,7 +615,6 @@ const VideoStreamService = (() => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (!res.body) throw new Error('No response body');
 
-      _cdBeep();
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = '';
@@ -596,7 +631,7 @@ const VideoStreamService = (() => {
             if (!line.startsWith('data:')) continue;
             const payload = _parseMessage(line.slice(5).trim());
             if (!payload) continue;
-            if (_applyItems(payload)) _notify();
+            const r = _applyItems(payload); if (r) _notify(r === 'new');
           }
 
           pump();
@@ -626,8 +661,50 @@ const VideoStreamService = (() => {
     _store.clear();
   }
 
-  return { connect, disconnect, reset };
+  async function poll() {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 8000); // 8s safety timeout
+    try {
+      const res = await fetch(`${ADMIN_API}/video-processing/stream`, {
+        headers: adminHeaders(),
+        signal: ac.signal,
+      });
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let gotData = false;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = _parseMessage(line.slice(5).trim());
+          if (!payload) continue;
+          const r = _applyItems(payload);
+          if (r) { _notify(r === 'new'); gotData = true; }
+        }
+        if (gotData) { reader.cancel(); break; }
+      }
+    } catch { /* network error or aborted — silently skip */ }
+    finally { clearTimeout(t); }
+  }
+
+  return { connect, disconnect, reset, poll };
 })();
+
+let _videoPollTimer = null;
+function _startVideoPoll() {
+  _stopVideoPoll();
+  VideoStreamService.poll(); // immediate first fetch
+  _videoPollTimer = setInterval(() => VideoStreamService.poll(), 5000);
+}
+function _stopVideoPoll() {
+  if (_videoPollTimer) { clearInterval(_videoPollTimer); _videoPollTimer = null; }
+}
 
 // Public entry points wired to buttons / auth
 function cdFetchVideos() {
@@ -705,6 +782,11 @@ function renderVideoList() {
     return;
   }
 
+  if (_pendingVideoId) {
+    const _pv = CD.allVideos.find(v => String(v.id) === String(_pendingVideoId));
+    if (_pv) { _pendingVideoId = null; setTimeout(() => cdSelectVideo(_pv.id), 0); }
+  }
+
   list.innerHTML = CD.filteredVideos.map(v => {
     const active = CD.activeVideo?.id === v.id;
     const status = v.video_processing_status || 'pending';
@@ -745,6 +827,7 @@ async function cdSelectVideo(id) {
   if (!video) return;
 
   CD.activeVideo = video;
+  history.pushState(null, '', '/clipping/' + id);
   CD.clips = [];
   CD.clipCounter = 0;
   CD.annCounter = 0;
@@ -755,6 +838,14 @@ async function cdSelectVideo(id) {
   CD.duration = 0;
   CD.sessionId = uid('sess');
   _detachClipBoundary();
+
+  const _draft = _loadClipsDraft(video.id);
+  if (_draft) {
+    CD.clips = _draft.clips;
+    CD.clipCounter = _draft.clipCounter || _draft.clips.length;
+    CD.annCounter = _draft.annCounter || 0;
+    cdStatus(`Restored ${CD.clips.length} unsaved clip(s) from your last session`, 'ok');
+  }
 
   // Update the list to reflect active state
   renderVideoList();
@@ -993,6 +1084,7 @@ function cdAddClip() {
   renderInOut(); renderMarkers(); renderClips(); updateUploadBtn();
   cdGenerateClips(true);
   cdStatus(`Added ${clip.label} — ${fmtTime(inT)} → ${fmtTime(outT)}  (${fmtTime(outT - inT)})`, 'ok');
+  _saveClipsDraft();
 
   if (CD.category === 'bowler') cdSelectClip(clip.id);
 }
@@ -1050,6 +1142,7 @@ function cdDeleteClip(e, id) {
   renderClips(); renderMarkers(); renderAnnPanel(); updateUploadBtn();
   cdGenerateClips(true);
   cdStatus('Clip removed');
+  _saveClipsDraft();
 }
 
 function renderClips() {
@@ -1120,7 +1213,7 @@ const STAGE_ORDER = ['run_up', 'back_foot_contact', 'delivery_stride', 'front_fo
 
 function renderAnnPanel() {
   const panel = document.getElementById('cd-ann-panel');
-  panel.classList.add('visible');
+  if (!CD.annotEngine.active) panel.classList.add('visible');
 
   const noSel    = document.getElementById('cd-ann-no-sel');
   const stagesEl = document.getElementById('cd-ann-stages');
@@ -1216,6 +1309,7 @@ function cdMarkStage(stage, which) {
     cdStatus(`${STAGES[stage]} marked at frame ${frame}`, 'ok');
     renderClips(); renderAnnPanel();
     cdGenerateClips(true);
+    _saveClipsDraft();
     return;
   }
 
@@ -1236,6 +1330,7 @@ function cdMarkStage(stage, which) {
     cdStatus(`${STAGES[stage]}: frames ${frameStart}→${frameEnd}`, 'ok');
     renderClips(); renderAnnPanel();
     cdGenerateClips(true);
+    _saveClipsDraft();
   } else {
     const waiting = which === 'start' ? 'now mark End' : 'now mark Start';
     cdStatus(`${STAGES[stage]} ${which} = frame ${frame} — ${waiting}`, 'info');
@@ -1251,6 +1346,7 @@ function cdClearStage(clipId, stage) {
   renderClips(); renderAnnPanel();
   cdGenerateClips(true);
   cdStatus(`${STAGES[stage]} cleared`, 'info');
+  _saveClipsDraft();
 }
 
 function cdSetShotType(clipId, shotType) {
@@ -1260,6 +1356,7 @@ function cdSetShotType(clipId, shotType) {
   renderClips();
   cdGenerateClips(true);
   cdStatus(shotType ? `Shot type: ${BATSMAN_SHOTS[shotType] || shotType}` : 'Shot type cleared', 'ok');
+  _saveClipsDraft();
 }
 
 function cdMarkBatsmanStage(stage, which) {
@@ -1276,6 +1373,7 @@ function cdMarkBatsmanStage(stage, which) {
     cdStatus(`${BATSMAN_STAGES[stage]} marked at frame ${frame}`, 'ok');
     renderClips(); renderAnnPanel();
     cdGenerateClips(true);
+    _saveClipsDraft();
     return;
   }
 
@@ -1294,6 +1392,7 @@ function cdMarkBatsmanStage(stage, which) {
     cdStatus(`${BATSMAN_STAGES[stage]}: frames ${frameStart}→${frameEnd}`, 'ok');
     renderClips(); renderAnnPanel();
     cdGenerateClips(true);
+    _saveClipsDraft();
   } else {
     const waiting = which === 'start' ? 'now mark End' : 'now mark Start';
     cdStatus(`${BATSMAN_STAGES[stage]} ${which} = frame ${frame} — ${waiting}`, 'info');
@@ -1309,6 +1408,7 @@ function cdClearBatsmanStage(clipId, stage) {
   renderClips(); renderAnnPanel();
   cdGenerateClips(true);
   cdStatus(`${BATSMAN_STAGES[stage]} cleared`, 'info');
+  _saveClipsDraft();
 }
 
 function cdDeleteAnnotation(e, clipId, annId) {
@@ -1458,6 +1558,7 @@ async function cdUploadClips() {
 
       const result = await res.json();
       cdStatus(`✓ Payload submitted — ${result.message || 'processing queued'}`, 'ok');
+      _clearClipsDraft();
     } catch (err) {
       cdStatus(`Upload failed — ${err.message}`, 'err');
       btn.disabled = false;
@@ -1492,8 +1593,8 @@ async function cdUploadClips() {
       const body = {
         player_id: CD.activeVideo.player_id,
         video_url: videoSrc,
-        start_timestamp: new Date(clip.inTime * 1000).toISOString(),
-        end_timestamp: new Date(clip.outTime * 1000).toISOString(),
+        start_timestamp: new Date((CD.activeVideo.start_timestamp ? new Date(CD.activeVideo.start_timestamp).getTime() : 0) + clip.inTime  * 1000).toISOString(),
+        end_timestamp:   new Date((CD.activeVideo.start_timestamp ? new Date(CD.activeVideo.start_timestamp).getTime() : 0) + clip.outTime * 1000).toISOString(),
         analysis_type: analysisType,
         video_analysis_type: CD.category === 'bowler' && clip.annotations.length > 0
           ? clip.annotations.map(a => a.stage).join(',')
@@ -1509,6 +1610,7 @@ async function cdUploadClips() {
       results.push(await res.json());
     }
     cdStatus(`✓ ${results.length} clip(s) submitted — processing queued`, 'ok');
+    _clearClipsDraft();
   } catch (err) {
     cdStatus(`Upload failed — ${err.message}`, 'err');
     btn.disabled = false;
@@ -1752,26 +1854,39 @@ function _annotOnTimeUpdate() {
   }
 }
 
-function cdAnnotToggle() {
-  const ae = CD.annotEngine;
-  ae.active = !ae.active;
-
+function cdSetAnalysisTab(tab) {
+  const ae         = CD.annotEngine;
   const annotPanel = document.getElementById('cd-annot-panel');
-  if (ae.active) _show(annotPanel, 'flex'); else _hide(annotPanel);
-  document.getElementById('cd-annot-btn')?.classList.toggle('active', ae.active);
+  const annPanel   = document.getElementById('cd-ann-panel');
+  const tabStages  = document.getElementById('cd-tab-stages');
+  const tabBall    = document.getElementById('cd-tab-ballspeed');
+  const toBall     = tab === 'ballspeed';
 
-  if (ae.active) {
+  tabStages.classList.toggle('active', !toBall);
+  tabBall.classList.toggle('active', toBall);
+
+  if (toBall) {
+    _show(annotPanel, 'flex');
+    annPanel.classList.remove('visible');
+    ae.active = true;
     cdAnnotResizeCanvas();
     _sCanvas.classList.add('active');
     _sCanvas.style.cursor = 'default';
     cdAnnotRender();
-    cdStatus('Annotation engine active — select a mode', 'info');
+    cdStatus('Ball Speed — select a mode (A, B, then ●)', 'info');
   } else {
+    _hide(annotPanel);
+    annPanel.classList.add('visible');
+    ae.active = false;
     _sCanvas.classList.remove('active');
     _sCtx?.clearRect(0, 0, _sCanvas.width, _sCanvas.height);
     ae.mode = 'none';
     cdAnnotUpdateModeBtns();
   }
+}
+
+function cdAnnotToggle() {
+  cdSetAnalysisTab(CD.annotEngine.active ? 'stages' : 'ballspeed');
 }
 
 function cdAnnotSetMode(mode) {
@@ -2556,30 +2671,12 @@ function onKeyDown(e) {
 
 // Dashboard view
 
-let _currentView = 'dashboard';
+let _currentView = (typeof location !== 'undefined' && location.pathname.startsWith('/clipping')) ? 'clipping' : 'dashboard';
+let _pendingVideoId = null;
 
 function cdShowView(view) {
   _currentView = view;
-  const dashEl = document.getElementById('cd-dashboard');
-  const clippingEl = document.getElementById('cd-clipping-view');
-  const tabDash = document.getElementById('cd-tab-dashboard');
-  const tabClip = document.getElementById('cd-tab-clipping');
-  const localBtn = document.getElementById('cd-subnav-local-btn');
-
-  if (view === 'dashboard') {
-    _show(dashEl, 'flex');
-    _hide(clippingEl);
-    tabDash.classList.add('active');
-    tabClip.classList.remove('active');
-    if (localBtn) _hide(localBtn);
-    cdRenderDashboard();
-  } else {
-    _hide(dashEl);
-    _show(clippingEl, 'flex');
-    tabDash.classList.remove('active');
-    tabClip.classList.add('active');
-    if (localBtn) _show(localBtn, 'inline-flex');
-  }
+  window.location.href = view === 'dashboard' ? '/overview' : '/clipping';
 }
 
 function cdRenderDashboard() {
@@ -2702,8 +2799,7 @@ function _renderPlayersTable(videos) {
 }
 
 function cdOpenPlayerClips(playerName) {
-  // Switch to clipping view and pre-fill the search with the player name
-  cdShowView('clipping');
+  window.location.href = '/clipping?search=' + encodeURIComponent(playerName);
   const searchEl = document.getElementById('cd-search-input');
   if (searchEl) {
     searchEl.value = playerName;
