@@ -3061,5 +3061,91 @@ a.cd-view-tab { text-decoration: none; }
 
 
 /* ═══════════════════════════════════════════════════════════
+   Toast notifications
+   ═══════════════════════════════════════════════════════════ */
+
+.cd-toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.cd-toast {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 12px 14px;
+  min-width: 260px;
+  max-width: 340px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: var(--shadow-md);
+  pointer-events: all;
+  animation: cd-toast-in 0.22s ease;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.cd-toast.is-leaving {
+  opacity: 0;
+  transform: translateX(16px);
+}
+
+@keyframes cd-toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.cd-toast-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cd-toast--new .cd-toast-icon       { background: var(--accent-muted);   color: var(--accent); }
+.cd-toast--processed .cd-toast-icon { background: var(--success-muted);  color: var(--success); }
+.cd-toast--err .cd-toast-icon       { background: var(--warn-muted);     color: var(--warn); }
+
+.cd-toast-body { flex: 1; min-width: 0; }
+
+.cd-toast-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.cd-toast-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cd-toast-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  font-size: 13px;
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity var(--transition);
+}
+.cd-toast-close:hover { opacity: 1; }
+
+/* ═══════════════════════════════════════════════════════════
    Animations
    ═══════════════════════════════════════════════════════════ */

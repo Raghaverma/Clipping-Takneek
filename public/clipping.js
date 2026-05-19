@@ -111,13 +111,47 @@ function _cdBeep() {
   } catch (_) {}
 }
 
+let _toastContainer = null;
+function _getToastContainer() {
+  if (!_toastContainer) {
+    _toastContainer = document.createElement('div');
+    _toastContainer.className = 'cd-toast-container';
+    document.body.appendChild(_toastContainer);
+  }
+  return _toastContainer;
+}
+
+function _cdToast(title, body, type = 'new') {
+  const container = _getToastContainer();
+  const iconSvg = type === 'processed'
+    ? `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`
+    : `<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>`;
+  const toast = document.createElement('div');
+  toast.className = `cd-toast cd-toast--${type}`;
+  toast.innerHTML = `
+    <div class="cd-toast-icon">${iconSvg}</div>
+    <div class="cd-toast-body">
+      <div class="cd-toast-title">${escHtml(title)}</div>
+      <div class="cd-toast-text">${escHtml(body)}</div>
+    </div>
+    <button class="cd-toast-close" title="Dismiss">✕</button>
+  `;
+  const dismiss = () => { toast.classList.add('is-leaving'); setTimeout(() => toast.remove(), 220); };
+  toast.querySelector('.cd-toast-close').addEventListener('click', dismiss);
+  container.appendChild(toast);
+  setTimeout(dismiss, 4500);
+}
+
 function _cdNotify(title, body) {
-  if (Notification.permission !== 'granted') return;
   const now = Date.now();
   if (now - _notifLastAt < 5000) return;
   _notifLastAt = now;
   _cdBeep();
-  new Notification(title, { body, icon: '/Takneek.svg' });
+  const type = title.toLowerCase().includes('process') ? 'processed' : 'new';
+  _cdToast(title, body, type);
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '/Takneek.svg' });
+  }
 }
 
 function cdAuthInit() {
