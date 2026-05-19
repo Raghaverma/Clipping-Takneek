@@ -1,5 +1,6 @@
 'use client'
-/* eslint-disable no-undef */
+
+import Link from 'next/link'
 
 export default function AppShell({ activePage, showCatToggle, children }) {
   return (
@@ -34,22 +35,25 @@ export default function AppShell({ activePage, showCatToggle, children }) {
             <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
           </svg>
         </button>
+        <button className="cd-logout-btn" onClick={() => cdLogout()} title="Sign out" id="cd-logout-btn">
+          Sign out
+        </button>
       </header>
 
       <div className="cd-subnav">
         <nav className="cd-view-tabs">
-          <a href="/overview" id="cd-tab-dashboard" className={`cd-view-tab${activePage === 'overview' ? ' active' : ''}`}>
+          <Link href="/overview" id="cd-tab-dashboard" className={`cd-view-tab${activePage === 'overview' ? ' active' : ''}`}>
             <svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13">
               <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
             </svg>
             Overview
-          </a>
-          <a href="/clipping" id="cd-tab-clipping" className={`cd-view-tab${activePage === 'clipping' ? ' active' : ''}`}>
+          </Link>
+          <Link href="/clipping" id="cd-tab-clipping" className={`cd-view-tab${activePage === 'clipping' ? ' active' : ''}`}>
             <svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13">
               <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
             </svg>
             Clipping
-          </a>
+          </Link>
         </nav>
         {showCatToggle && (
           <div className="cd-subnav-right">

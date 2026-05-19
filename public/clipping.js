@@ -4,11 +4,21 @@
 // All cd*/CD globals are referenced from app/page.js (loaded via <Script> tag).
 
 const _cfg              = window.__CD_CONFIG__ || {};
-const TAKNEEK_API       = _cfg.takneekApi       || 'https://takneek.crik.ai/api/v1';
-const ADMIN_API         = _cfg.adminApi         || 'http://takneek-b2c.crik.ai/api/v1';
-const R2_METADATA_URL   = _cfg.r2MetadataUrl    || '';
-const R2_METADATA_TOKEN = _cfg.r2MetadataToken  || '';
 const GOOGLE_CLIENT_ID  = _cfg.googleClientId   || '';
+const OAUTH_REDIRECT_URI = _cfg.redirectUri || `${location.origin}/oauth-callback.html`;
+const METADATA_UPLOAD_ENABLED = !!_cfg.metadataUploadEnabled;
+
+function _assertRuntimeConfig() {
+  const missing = [];
+  if (!GOOGLE_CLIENT_ID) missing.push('Google Client ID');
+  if (!OAUTH_REDIRECT_URI) missing.push('OAuth Redirect URI');
+  if (missing.length) {
+    cdStatus(`Configuration missing: ${missing.join(', ')}`, 'err');
+    _clientLog('config.missing', { missing }, 'error');
+    return false;
+  }
+  return true;
+}
 
 // Show/hide helpers — replace scattered style.display assignments
 function _show(el, display = 'flex') { if (el) { el.classList.remove('is-hidden'); el.style.display = display; } }
@@ -17,8 +27,9 @@ function _showId(id, d) { _show(document.getElementById(id), d); }
 function _hideId(id)    { _hide(document.getElementById(id)); }
 
 let _sseAbort = null;
+let _sseRetryTimer = null;
 
-const CD = {
+var CD = {
   // API data
   allVideos: [],   // full list from API
   filteredVideos: [],   // after search/angle filter
@@ -100,8 +111,8 @@ const ANGLE_LABELS = {
   other: 'Other',
 };
 
-function tkHeaders()    { const h = { 'Content-Type': 'application/json' }; if (_AUTH.token) h['Authorization'] = `Bearer ${_AUTH.token}`; return h; }
-function adminHeaders() { const h = { 'Content-Type': 'application/json' }; if (_AUTH.token) h['Authorization'] = `Bearer ${_AUTH.token}`; return h; }
+function tkHeaders()    { return { 'Content-Type': 'application/json' }; }
+function adminHeaders() { return { 'Content-Type': 'application/json' }; }
 
 let _notifLastAt = 0;
 
@@ -154,22 +165,43 @@ function _cdNotify(title, body) {
   }
 }
 
-function cdAuthInit() {
+async function cdAuthInit() {
   if (Notification.permission === 'default') Notification.requestPermission();
-  const saved = _authLoad();
-  if (saved?.token) {
-    _AUTH.token = saved.token;
-    _AUTH.user  = saved.user;
-    _cdAfterLogin();
+  if (!_assertRuntimeConfig()) {
+    _showId('cd-login-overlay', 'flex');
     return;
   }
+  try {
+    const res = await fetch('/api/auth/session');
+    if (res.ok) {
+      const { user } = await res.json();
+      _AUTH.user = user;
+      _authSave({ user });
+      _cdAfterLogin();
+      return;
+    }
+  } catch (_) {}
+  try { localStorage.removeItem('cd_auth'); } catch {}
   _showId('cd-login-overlay', 'flex');
 }
 
 function _cdAfterLogin() {
   _hideId('cd-login-overlay');
+  _clientLog('auth.session.ready');
   cdConnectSSE();
   _startVideoPoll();
+}
+
+async function cdLogout() {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+  _AUTH.user = null;
+  try { localStorage.removeItem('cd_auth'); } catch {}
+  if (_sseAbort) { _sseAbort.abort(); _sseAbort = null; }
+  if (_sseRetryTimer) { clearTimeout(_sseRetryTimer); _sseRetryTimer = null; }
+  VideoStreamService.disconnect();
+  _stopVideoPoll();
+  _showId('cd-login-overlay', 'flex');
+  cdStatus('Signed out', 'info');
 }
 
 async function cdGoogleSignIn() {
@@ -184,7 +216,7 @@ async function cdGoogleSignIn() {
 
     const params = new URLSearchParams({
       client_id:             GOOGLE_CLIENT_ID,
-      redirect_uri:          `${location.origin}/oauth-callback.html`,
+      redirect_uri:          OAUTH_REDIRECT_URI,
       response_type:         'code',
       scope:                 'openid email profile',
       code_challenge:        challenge,
@@ -226,9 +258,8 @@ async function cdGoogleSignIn() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-    _AUTH.token = data.token;
-    _AUTH.user  = data.user;
-    _authSave({ token: data.token, user: data.user });
+    _AUTH.user = data.user;
+    _authSave({ user: data.user });
     _cdAfterLogin();
   } catch (err) {
     if (errEl) errEl.textContent = err.message;
@@ -248,29 +279,66 @@ async function _pkceGenerate() {
   return { verifier, challenge };
 }
 
-const _AUTH = { token: null, user: null };
-function _authSave(data) { try { localStorage.setItem('cd_auth', JSON.stringify(data)); } catch {} }
+const _AUTH = { user: null };
+function _authSave(data) { try { localStorage.setItem('cd_auth', JSON.stringify({ user: data.user })); } catch {} }
 function _authLoad()     { try { return JSON.parse(localStorage.getItem('cd_auth')); } catch { return null; } }
+
+function _clipsDraftKey(videoId = CD.activeVideo?.id) {
+  return videoId ? `cd_clips_draft:${videoId}` : 'cd_clips_draft';
+}
+
+function _hasUnsavedWork() {
+  return !!CD.activeVideo && CD.clips.length > 0 && !CD.generated;
+}
 
 function _saveClipsDraft() {
   if (!CD.activeVideo || String(CD.activeVideo.id).startsWith('local-')) return;
   try {
-    localStorage.setItem('cd_clips_draft', JSON.stringify({
+    localStorage.setItem(_clipsDraftKey(), JSON.stringify({
       videoId: CD.activeVideo.id,
       clips: CD.clips,
       clipCounter: CD.clipCounter,
       annCounter: CD.annCounter,
       sessionId: CD.sessionId,
+      savedAt: new Date().toISOString(),
     }));
+  } catch (error) {
+    _clientLog('draft.save.failed', { message: error.message }, 'warn');
+  }
+}
+function _clearClipsDraft(videoId = CD.activeVideo?.id) {
+  try {
+    localStorage.removeItem(_clipsDraftKey(videoId));
+    localStorage.removeItem('cd_clips_draft');
   } catch {}
 }
-function _clearClipsDraft() { try { localStorage.removeItem('cd_clips_draft'); } catch {} }
 function _loadClipsDraft(videoId) {
   try {
-    const d = JSON.parse(localStorage.getItem('cd_clips_draft'));
+    const d = JSON.parse(localStorage.getItem(_clipsDraftKey(videoId)) || localStorage.getItem('cd_clips_draft'));
     if (d && d.videoId === videoId && Array.isArray(d.clips) && d.clips.length > 0) return d;
   } catch {}
   return null;
+}
+
+function _handleAuthExpired(source = 'session') {
+  _clientLog('auth.session.expired', { source }, 'warn');
+  cdStatus('Session expired — please sign in again', 'err');
+  if (_sseAbort) { _sseAbort.abort(); _sseAbort = null; }
+  if (_sseRetryTimer) { clearTimeout(_sseRetryTimer); _sseRetryTimer = null; }
+  VideoStreamService.disconnect();
+  _stopVideoPoll();
+  _showId('cd-login-overlay', 'flex');
+}
+
+function _clientLog(event, context = {}, level = 'info') {
+  try {
+    const body = JSON.stringify({ event, context, level, message: context.message || '' });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/log', new Blob([body], { type: 'application/json' }));
+      return;
+    }
+    fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+  } catch {}
 }
 
 function cdConnectSSE() {
@@ -279,10 +347,8 @@ function cdConnectSSE() {
   _sseAbort = new AbortController();
   const signal = _sseAbort.signal;
 
-  fetch(`${ADMIN_API}/admin/stream`, {
-    headers: adminHeaders(),
-    signal,
-  }).then(res => {
+  fetch('/api/stream/admin', { signal }).then(res => {
+    if (res.status === 401) { _handleAuthExpired('admin-stream'); return; }
     if (!res.ok || !res.body) throw new Error(`SSE HTTP ${res.status}`);
     cdStatus('Real-time stream connected', 'ok');
 
@@ -336,15 +402,16 @@ function cdConnectSSE() {
       });
     }
     pump();
-  }).catch(() => {
-    if (!signal.aborted) _sseReconnect();
+  }).catch((error) => {
+    if (!signal.aborted) _sseReconnect(error);
   });
 }
 
-function _sseReconnect() {
+function _sseReconnect(error) {
+  if (error) _clientLog('stream.admin.retry', { message: error.message }, 'warn');
   cdStatus('SSE stream disconnected — retrying in 8s', 'err');
   _sseAbort = null;
-  setTimeout(cdConnectSSE, 8000);
+  _sseRetryTimer = setTimeout(cdConnectSSE, 8000);
 }
 
 function _mapStreamItem(item) {
@@ -472,6 +539,18 @@ const ZOOM_MIN = 1, ZOOM_MAX = 12, ZOOM_SPEED = 0.12;
 
 function _cdDomInit() {
   statusBar = document.getElementById('cd-statusbar');
+  window.addEventListener('error', (event) => {
+    _clientLog('client.error', { message: event.message, source: event.filename, line: event.lineno }, 'error');
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    _clientLog('client.unhandledrejection', { message: event.reason?.message || String(event.reason) }, 'error');
+  });
+  window.addEventListener('beforeunload', (event) => {
+    if (!_hasUnsavedWork()) return;
+    _saveClipsDraft();
+    event.preventDefault();
+    event.returnValue = '';
+  });
 
   videoEl = document.getElementById('cd-video');
   if (videoEl) {
@@ -574,6 +653,7 @@ function escHtml(s) {
 }
 
 function cdStatus(msg, type = '') {
+  if (!statusBar) return;
   statusBar.textContent = msg;
   statusBar.className = `cd-statusbar${type ? ' ' + type : ''}`;
 }
@@ -635,11 +715,8 @@ const VideoStreamService = (() => {
     _abort = new AbortController();
     const { signal } = _abort;
 
-    fetch(`${ADMIN_API}/video-processing/stream`, {
-      headers: adminHeaders(),
-      signal,
-    }).then(res => {
-      if (res.status === 401) { cdStatus('API returned 401 — check credentials', 'err'); return; }
+    fetch('/api/stream/videos', { signal }).then(res => {
+      if (res.status === 401) { _handleAuthExpired('video-stream'); return; }
       if (res.status === 404) {
         _store.clear();
         _notify();
@@ -675,8 +752,8 @@ const VideoStreamService = (() => {
       }
 
       pump();
-    }).catch(() => {
-      if (!signal.aborted) _scheduleRetry();
+    }).catch((error) => {
+      if (!signal.aborted) _scheduleRetry(error);
     });
   }
 
@@ -685,7 +762,8 @@ const VideoStreamService = (() => {
     if (_abort) { _abort.abort(); _abort = null; }
   }
 
-  function _scheduleRetry() {
+  function _scheduleRetry(error) {
+    if (error) _clientLog('stream.videos.retry', { message: error.message }, 'warn');
     cdStatus('Stream disconnected — retrying…', 'err');
     _retryTimer = setTimeout(connect, RETRY_DELAY);
   }
@@ -699,10 +777,8 @@ const VideoStreamService = (() => {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 8000); // 8s safety timeout
     try {
-      const res = await fetch(`${ADMIN_API}/video-processing/stream`, {
-        headers: adminHeaders(),
-        signal: ac.signal,
-      });
+      const res = await fetch('/api/stream/videos', { signal: ac.signal });
+      if (res.status === 401) { _handleAuthExpired('video-poll'); return; }
       if (!res.ok || !res.body) return;
       const reader = res.body.getReader();
       const dec = new TextDecoder();
@@ -723,7 +799,7 @@ const VideoStreamService = (() => {
         }
         if (gotData) { reader.cancel(); break; }
       }
-    } catch { /* network error or aborted — silently skip */ }
+    } catch (error) { _clientLog('stream.videos.poll.failed', { message: error.message }, 'warn'); }
     finally { clearTimeout(t); }
   }
 
@@ -879,7 +955,8 @@ async function cdSelectVideo(id) {
     CD.clips = _draft.clips;
     CD.clipCounter = _draft.clipCounter || _draft.clips.length;
     CD.annCounter = _draft.annCounter || 0;
-    cdStatus(`Restored ${CD.clips.length} unsaved clip(s) from your last session`, 'ok');
+    cdStatus(`Restored ${CD.clips.length} unsaved clip(s) from ${new Date(_draft.savedAt || Date.now()).toLocaleString()}`, 'ok');
+    _clientLog('draft.restored', { videoId: video.id, clips: CD.clips.length });
   }
 
   // Update the list to reflect active state
@@ -1482,7 +1559,7 @@ function cdGenerateClips(silent = false) {
   }
 
   const metadata = buildMetadata();
-  if (!silent) console.log('[Clipping] Session metadata:', JSON.stringify(metadata, null, 2));
+  if (!silent) _clientLog('metadata.generated', { sessionId: metadata.sessionId, clips: metadata.clips.length });
 
   CD.generated = true;
   CD._lastMetadata = metadata;
@@ -1498,27 +1575,24 @@ function cdGenerateClips(silent = false) {
 }
 
 async function cdUploadMetadataToR2(metadata, silent = false) {
-  if (!R2_METADATA_URL) return; // not configured yet
-
-  const key = `takneek/${metadata.sessionId}.json`;
-  const url = R2_METADATA_URL.replace(/\/$/, '') + '/' + key;
+  if (!METADATA_UPLOAD_ENABLED) return;
 
   try {
-    if (!silent) cdStatus('Uploading metadata to R2…', 'info');
-    const res = await fetch(url, {
+    if (!silent) cdStatus('Uploading metadata…', 'info');
+    const res = await fetch('/api/metadata/upload', {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(R2_METADATA_TOKEN ? { Authorization: `Bearer ${R2_METADATA_TOKEN}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(metadata, null, 2),
     });
+    const result = await res.json().catch(() => ({}));
+    if (res.status === 401) { _handleAuthExpired('metadata-upload'); return; }
+    if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
 
-    if (!silent) cdStatus(`Metadata uploaded → R2: ${key}`, 'ok');
-    console.log('[R2] Uploaded metadata:', url);
+    if (!silent) cdStatus(`Metadata uploaded: ${result.key || metadata.sessionId}`, 'ok');
+    _clientLog('metadata.upload.success', { key: result.key || metadata.sessionId });
   } catch (err) {
-    if (!silent) cdStatus(`R2 upload failed — ${err.message}`, 'err');
-    console.error('[R2] Upload error:', err);
+    if (!silent) cdStatus(`Metadata upload failed — ${err.message}`, 'err');
+    _clientLog('metadata.upload.failed', { message: err.message }, 'error');
   }
 }
 
@@ -1585,10 +1659,11 @@ async function cdUploadClips() {
 
       if (res.status === 409) {
         const err = await res.json();
-        cdStatus(`Already processed (ID: ${err.existingAdminProcessingId})`, 'err');
+        cdStatus(`Already processed (ID: ${err.existingAdminProcessingId || 'unknown'})`, 'err');
         btn.disabled = false;
         return;
       }
+      if (res.status === 401) { _handleAuthExpired('clip-upload'); btn.disabled = false; return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const result = await res.json();
@@ -1641,6 +1716,7 @@ async function cdUploadClips() {
         headers: adminHeaders(),
         body: JSON.stringify(body),
       });
+      if (res.status === 401) { _handleAuthExpired('clip-upload'); btn.disabled = false; return; }
       if (!res.ok) throw new Error(`HTTP ${res.status} on clip "${clip.label}"`);
       results.push(await res.json());
     }

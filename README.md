@@ -92,11 +92,14 @@ Create a `.env.local` file in the project root:
 NEXT_PUBLIC_TAKNEEK_API=https://takneek.crik.ai/api/v1
 NEXT_PUBLIC_ADMIN_API=https://takneek-b2c.crik.ai/api/v1
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id
-NEXT_PUBLIC_R2_METADATA_URL=https://your-worker.workers.dev/metadata
-NEXT_PUBLIC_R2_METADATA_TOKEN=your-bearer-token
+NEXT_PUBLIC_REDIRECT_URI=https://yourdomain.com/oauth-callback.html
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+R2_METADATA_URL=https://your-worker.workers.dev/metadata
+R2_METADATA_TOKEN=your-bearer-token
 ```
 
 These are injected into `window.__CD_CONFIG__` at runtime by `app/layout.js` and consumed by `public/clipping.js`.
+Only public client settings are exposed to the browser; session tokens and R2 credentials stay on server routes.
 
 ---
 
@@ -120,9 +123,18 @@ npm start
 
 1. On first load, a login overlay appears.
 2. Sign in with **Google OAuth** (Google account linked to your Takneek admin profile).
-3. The JWT is saved to `localStorage` and reused across sessions — no re-login needed until you sign out.
+3. The app stores the backend session in an HttpOnly cookie and keeps only non-sensitive user display data in browser storage.
 4. The SSE stream connects automatically after login and pushes live video updates.
 5. Click **Sign out** in the top bar to clear the token and return to the login screen.
+
+---
+
+## Logs & Observability
+
+- Server routes emit structured JSON logs to stdout with `level`, `event`, `at`, and `requestId`.
+- API responses include `x-request-id` so browser failures can be matched to server logs.
+- Browser errors, stream reconnects, auth expiry, draft restore events, and metadata upload results are posted to `/api/log`.
+- Metadata upload is proxied through `/api/metadata/upload`, keeping storage credentials out of the browser.
 
 ---
 

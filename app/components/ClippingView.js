@@ -1,5 +1,4 @@
 'use client'
-/* eslint-disable no-undef */
 
 export default function ClippingView({ videoId }) {
   return (
