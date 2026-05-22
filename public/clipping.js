@@ -1826,22 +1826,25 @@ function updateUploadBtn() {
   document.getElementById('cd-upload-btn').disabled = CD.clips.length === 0;
 }
 
+function _nextQueuedVideo(currentId) {
+  const idx = CD.filteredVideos.findIndex(v => v.id === currentId);
+  return idx !== -1 ? CD.filteredVideos[idx + 1] || null : null;
+}
+
 function _removeActiveVideoFromQueue() {
   const id = CD.activeVideo?.id;
   if (!id || String(id).startsWith('local-')) return;
 
-  // Capture next video before removing current from the filtered list
-  const nextVideo = CD.filteredVideos.find(v => v.id !== id) || null;
+  // Capture sequential next before removing so the list is still intact
+  const nextVideo = _nextQueuedVideo(id);
 
   VideoStreamService.remove(id);
 
-  if (nextVideo) {
-    cdSelectVideo(nextVideo.id);
-  }
+  if (nextVideo) cdSelectVideo(nextVideo.id);
 }
 
 function cdSelectNextVideo() {
-  const next = CD.filteredVideos.find(v => v.id !== CD.activeVideo?.id);
+  const next = _nextQueuedVideo(CD.activeVideo?.id);
   if (next) cdSelectVideo(next.id);
 }
 
@@ -1849,7 +1852,7 @@ function _updateNextVideoBtn() {
   const bar = document.getElementById('cd-next-video-bar');
   const label = document.getElementById('cd-next-video-label');
   if (!bar) return;
-  const next = CD.filteredVideos.find(v => v.id !== CD.activeVideo?.id);
+  const next = _nextQueuedVideo(CD.activeVideo?.id);
   if (CD.activeVideo && next) {
     if (label) label.textContent = next.display_name ? `Next: ${next.display_name}` : 'Next Video';
     _show(bar, 'flex');
