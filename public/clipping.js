@@ -671,9 +671,10 @@ const VideoStreamService = (() => {
   // Keyed by player_analysis_id — no duplicates
   const _store = new Map();
   const _seenIds = new Set(); // tracks all IDs ever received; survives reconnects
+  const _removedIds = new Set(); // IDs explicitly removed after upload — filtered out of queue permanently
 
   function _notify(hasNewVideo = false) {
-    const items = Array.from(_store.values());
+    const items = Array.from(_store.values()).filter(item => !_removedIds.has(item.player_analysis_id));
     CD.allVideos = items.map(_mapStreamItem);
     cdFilterVideos();
     if (typeof _currentView !== 'undefined' && _currentView === 'dashboard') {
@@ -773,6 +774,12 @@ const VideoStreamService = (() => {
     _store.clear();
   }
 
+  function remove(id) {
+    _removedIds.add(id);
+    _store.delete(id);
+    _notify();
+  }
+
   async function poll() {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 8000); // 8s safety timeout
@@ -803,7 +810,7 @@ const VideoStreamService = (() => {
     finally { clearTimeout(t); }
   }
 
-  return { connect, disconnect, reset, poll };
+  return { connect, disconnect, reset, poll, remove };
 })();
 
 let _videoPollTimer = null;
@@ -1669,6 +1676,7 @@ async function cdUploadClips() {
       const result = await res.json();
       cdStatus(`✓ Payload submitted — ${result.message || 'processing queued'}`, 'ok');
       _clearClipsDraft();
+      _removeActiveVideoFromQueue();
     } catch (err) {
       cdStatus(`Upload failed — ${err.message}`, 'err');
       btn.disabled = false;
@@ -1722,6 +1730,7 @@ async function cdUploadClips() {
     }
     cdStatus(`✓ ${results.length} clip(s) submitted — processing queued`, 'ok');
     _clearClipsDraft();
+    _removeActiveVideoFromQueue();
   } catch (err) {
     cdStatus(`Upload failed — ${err.message}`, 'err');
     btn.disabled = false;
@@ -1813,6 +1822,12 @@ function buildMetadata() {
 
 function updateUploadBtn() {
   document.getElementById('cd-upload-btn').disabled = CD.clips.length === 0;
+}
+
+function _removeActiveVideoFromQueue() {
+  const id = CD.activeVideo?.id;
+  if (!id || String(id).startsWith('local-')) return;
+  VideoStreamService.remove(id);
 }
 
 
