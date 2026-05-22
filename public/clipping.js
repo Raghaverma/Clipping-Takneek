@@ -905,6 +905,8 @@ function renderVideoList() {
     if (_pv) { _pendingVideoId = null; setTimeout(() => cdSelectVideo(_pv.id), 0); }
   }
 
+  _updateNextVideoBtn();
+
   list.innerHTML = CD.filteredVideos.map(v => {
     const active = CD.activeVideo?.id === v.id;
     const status = v.video_processing_status || 'pending';
@@ -1827,7 +1829,33 @@ function updateUploadBtn() {
 function _removeActiveVideoFromQueue() {
   const id = CD.activeVideo?.id;
   if (!id || String(id).startsWith('local-')) return;
+
+  // Capture next video before removing current from the filtered list
+  const nextVideo = CD.filteredVideos.find(v => v.id !== id) || null;
+
   VideoStreamService.remove(id);
+
+  if (nextVideo) {
+    cdSelectVideo(nextVideo.id);
+  }
+}
+
+function cdSelectNextVideo() {
+  const next = CD.filteredVideos.find(v => v.id !== CD.activeVideo?.id);
+  if (next) cdSelectVideo(next.id);
+}
+
+function _updateNextVideoBtn() {
+  const bar = document.getElementById('cd-next-video-bar');
+  const label = document.getElementById('cd-next-video-label');
+  if (!bar) return;
+  const next = CD.filteredVideos.find(v => v.id !== CD.activeVideo?.id);
+  if (CD.activeVideo && next) {
+    if (label) label.textContent = next.display_name ? `Next: ${next.display_name}` : 'Next Video';
+    _show(bar, 'flex');
+  } else {
+    _hide(bar);
+  }
 }
 
 
@@ -2439,9 +2467,6 @@ function cdAnnotRender() {
     if (ae.speedResult) {
       _show(speedEl, 'flex');
       setText('cd-annot-kmh', ae.speedResult.avgKmh);
-      const { releaseKmh, maxKmh, avgKmh, n } = ae.speedResult;
-      const relStr = releaseKmh && releaseKmh > avgKmh ? `Release ~${releaseKmh} km/h · ` : '';
-      setText('cd-annot-peak', `${relStr}Peak ${maxKmh} km/h · ${n} pts`);
     } else {
       _hide(speedEl);
     }

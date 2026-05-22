@@ -138,6 +138,15 @@ export default function ClippingView({ videoId }) {
             <span className="cd-io-dur is-hidden" id="cd-io-dur">—</span>
           </div>
 
+          <div className="cd-next-video-bar is-hidden" id="cd-next-video-bar">
+            <button className="cd-next-video-btn" id="cd-next-video-btn" onClick={() => cdSelectNextVideo()}>
+              <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12">
+                <path d="M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z"/>
+              </svg>
+              <span id="cd-next-video-label">Next Video</span>
+            </button>
+          </div>
+
           <div className="cd-hints">
             Space · play/pause &nbsp;·&nbsp;
             I · set start &nbsp;·&nbsp;
@@ -250,7 +259,6 @@ export default function ClippingView({ videoId }) {
                     <span className="cd-annot-kmh" id="cd-annot-kmh">—</span>
                     <span className="cd-annot-unit">km/h</span>
                   </div>
-                  <div className="cd-annot-peak" id="cd-annot-peak">—</div>
                 </div>
 
                 <div className="cd-annot-pts" id="cd-annot-pts">

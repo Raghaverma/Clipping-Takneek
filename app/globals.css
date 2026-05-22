@@ -1554,6 +1554,39 @@ input, select {
   font-variant-numeric: tabular-nums;
 }
 
+/* ─── Next Video bar ─────────────────────────────────────── */
+.cd-next-video-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 0 4px;
+  flex-shrink: 0;
+}
+
+.cd-next-video-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 100px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cd-next-video-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-muted);
+}
+
 /* ─── Keyboard hints ─────────────────────────────────────── */
 .cd-hints {
   font-size: 10px;

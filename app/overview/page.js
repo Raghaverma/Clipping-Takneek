@@ -8,6 +8,68 @@ export default function OverviewPage() {
     <AppShell activePage="overview">
       <div id="cd-dashboard" className="cd-dashboard-view">
 
+        <div className="cd-stat-row">
+          <div className="cd-stat-card">
+            <div className="cd-stat-icon cd-stat-icon--total">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+              </svg>
+            </div>
+            <div className="cd-stat-body">
+              <div className="cd-stat-value" id="cd-stat-total">—</div>
+              <div className="cd-stat-label">Total Videos</div>
+            </div>
+          </div>
+
+          <div className="cd-stat-card">
+            <div className="cd-stat-icon cd-stat-icon--batter">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                <path d="M13.49 5.48c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-3.6 13.9l1-4.4 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1l-5.2 2.2v4.7h2v-3.4l1.8-.7-1.6 8.1-4.9-1-.4 2 7 1.4z"/>
+              </svg>
+            </div>
+            <div className="cd-stat-body">
+              <div className="cd-stat-value" id="cd-stat-batters">—</div>
+              <div className="cd-stat-label">Batter Clips</div>
+            </div>
+          </div>
+
+          <div className="cd-stat-card">
+            <div className="cd-stat-icon cd-stat-icon--bowler">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31C15.55 19.37 13.85 20 12 20zm6.31-3.1L7.1 5.69C8.45 4.63 10.15 4 12 4c4.42 0 8 3.58 8 8 0 1.85-.63 3.55-1.69 4.9z"/>
+              </svg>
+            </div>
+            <div className="cd-stat-body">
+              <div className="cd-stat-value" id="cd-stat-bowlers">—</div>
+              <div className="cd-stat-label">Bowler Clips</div>
+            </div>
+          </div>
+
+          <div className="cd-stat-card">
+            <div className="cd-stat-icon cd-stat-icon--allrounder">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+              </svg>
+            </div>
+            <div className="cd-stat-body">
+              <div className="cd-stat-value" id="cd-stat-players">—</div>
+              <div className="cd-stat-label">Players</div>
+            </div>
+          </div>
+
+          <div className="cd-stat-card">
+            <div className="cd-stat-icon cd-stat-icon--processed">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+              </svg>
+            </div>
+            <div className="cd-stat-body">
+              <div className="cd-stat-value" id="cd-stat-processed">—</div>
+              <div className="cd-stat-label">Processed</div>
+            </div>
+          </div>
+        </div>
+
         <div className="cd-dash-body">
 
           <div className="cd-dash-section cd-dash-players">
@@ -59,6 +121,17 @@ export default function OverviewPage() {
                   </svg>
                   Refresh Data
                 </button>
+              </div>
+            </div>
+
+            <div className="cd-dash-section">
+              <div className="cd-dash-section-header">
+                <span className="cd-dash-section-title">Clip Breakdown</span>
+              </div>
+              <div className="cd-breakdown" id="cd-breakdown">
+                <div className="cd-breakdown-loading">
+                  <div className="cd-spinner"></div>
+                </div>
               </div>
             </div>
           </div>
