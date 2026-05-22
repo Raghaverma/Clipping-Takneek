@@ -609,6 +609,9 @@ function _cdDomInit() {
     if (_sq) { const s = document.getElementById('cd-search-input'); if (s) s.value = _sq; }
   }
 
+  // Apply saved theme before first paint
+  _initTheme();
+
   // Auth init — shows login overlay or connects with saved token
   cdAuthInit();
 }
@@ -656,6 +659,99 @@ function cdStatus(msg, type = '') {
   if (!statusBar) return;
   statusBar.textContent = msg;
   statusBar.className = `cd-statusbar${type ? ' ' + type : ''}`;
+}
+
+// ── Dark / Light theme ────────────────────────────────────────
+function _initTheme() {
+  const saved = (() => { try { return localStorage.getItem('cd_theme'); } catch { return null; } })();
+  if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  _syncThemeBtn();
+}
+
+function cdToggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  if (isDark) {
+    document.documentElement.removeAttribute('data-theme');
+    try { localStorage.setItem('cd_theme', 'light'); } catch {}
+  } else {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    try { localStorage.setItem('cd_theme', 'dark'); } catch {}
+  }
+  _syncThemeBtn();
+}
+
+function _syncThemeBtn() {
+  const btn = document.getElementById('cd-theme-btn');
+  if (!btn) return;
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  btn.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+  btn.innerHTML = isDark
+    ? `<svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58a.996.996 0 0 0-1.41 0 .996.996 0 0 0 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37a.996.996 0 0 0-1.41 0 .996.996 0 0 0 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0a.996.996 0 0 0 0-1.41l-1.06-1.06zm1.06-12.38-1.06 1.06a.996.996 0 1 0 1.41 1.41l1.06-1.06a.996.996 0 1 0-1.41-1.41zM7.05 18.36l-1.06 1.06a.996.996 0 1 0 1.41 1.41l1.06-1.06a.996.996 0 1 0-1.41-1.41z"/></svg>`
+    : `<svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>`;
+}
+
+// ── Video thumbnail cache ─────────────────────────────────────
+const _thumbCache = new Map(); // id → dataURL | 'pending' | 'err'
+let _thumbVid = null, _thumbCanvas = null, _thumbCtx = null;
+
+function _thumbGetEl() {
+  if (!_thumbVid) {
+    _thumbVid = document.createElement('video');
+    _thumbVid.crossOrigin = 'anonymous';
+    _thumbVid.muted = true;
+    _thumbVid.preload = 'metadata';
+    _thumbCanvas = document.createElement('canvas');
+    _thumbCanvas.width = 96;
+    _thumbCanvas.height = 54;
+    _thumbCtx = _thumbCanvas.getContext('2d');
+  }
+  return _thumbVid;
+}
+
+function _generateThumb(video) {
+  const url = video.video_processed_url || video.video_url;
+  if (!url) return;
+  _thumbCache.set(video.id, 'pending');
+  const vid = _thumbGetEl();
+  const cleanup = () => {
+    vid.removeEventListener('loadedmetadata', onMeta);
+    vid.removeEventListener('seeked', onSeeked);
+    vid.removeEventListener('error', onErr);
+  };
+  const onMeta = () => { vid.currentTime = Math.min(vid.duration * 0.1, 3); };
+  const onSeeked = () => {
+    cleanup();
+    try {
+      _thumbCtx.drawImage(vid, 0, 0, 96, 54);
+      _thumbCache.set(video.id, _thumbCanvas.toDataURL('image/jpeg', 0.5));
+    } catch (_) { _thumbCache.set(video.id, 'err'); }
+    vid.src = '';
+    renderVideoList();
+  };
+  const onErr = () => { cleanup(); _thumbCache.set(video.id, 'err'); vid.src = ''; };
+  vid.addEventListener('loadedmetadata', onMeta);
+  vid.addEventListener('seeked', onSeeked);
+  vid.addEventListener('error', onErr);
+  vid.src = url;
+}
+
+function _itemIconOrThumb(v, status) {
+  const cached = _thumbCache.get(v.id);
+  if (cached && cached !== 'pending' && cached !== 'err') {
+    const dot = v.is_streamable ? '<div class="cd-vitem-ready-dot"></div>' : '';
+    return `<div class="cd-vitem-thumb-wrap">${dot}<img class="cd-vitem-thumb" src="${escHtml(cached)}" alt=""></div>`;
+  }
+  if (!_thumbCache.has(v.id) && (v.video_processed_url || v.video_url)) {
+    setTimeout(() => _generateThumb(v), 0);
+  }
+  return _itemIcon(status, v.is_streamable);
+}
+
+// ── Shortcut modal ────────────────────────────────────────────
+function cdToggleShortcutModal() {
+  const el = document.getElementById('cd-shortcuts-overlay');
+  if (!el) return;
+  el.classList.toggle('is-hidden');
 }
 
 function angleLabel(a) {
@@ -918,7 +1014,7 @@ function renderVideoList() {
     return `
       <div class="cd-video-item cd-video-item--${escHtml(status)}${active ? ' active' : ''}"
            onclick="cdSelectVideo('${escHtml(v.id)}')">
-        ${_itemIcon(status, v.is_streamable)}
+        ${_itemIconOrThumb(v, status)}
         <div class="cd-vitem-meta">
           <span class="cd-vitem-name">${escHtml(name)}</span>
           <div class="cd-vitem-tags">${angle}${_statusBadge(status)}</div>
@@ -1265,6 +1361,7 @@ function cdDeleteClip(e, id) {
   cdStatus('Clip removed');
   _saveClipsDraft();
 }
+
 
 function renderClips() {
   const list = document.getElementById('cd-clips-scroll');
@@ -2779,6 +2876,7 @@ function onKeyDown(e) {
   }
   if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === '?') { cdToggleShortcutModal(); return; }
 
   switch (e.code) {
     case 'Space': e.preventDefault(); cdTogglePlay(); break;
@@ -2809,7 +2907,12 @@ function onKeyDown(e) {
     }
     // Annotation engine mode shortcuts (only when active)
     case 'KeyB': if (CD.annotEngine.active) { e.preventDefault(); cdAnnotSetMode('ball'); } break;
-    case 'Escape': if (CD.annotEngine.active) { e.preventDefault(); cdAnnotSetMode('none'); } break;
+    case 'Escape': {
+      const sm = document.getElementById('cd-shortcuts-overlay');
+      if (sm && !sm.classList.contains('is-hidden')) { sm.classList.add('is-hidden'); }
+      else if (CD.annotEngine.active) { e.preventDefault(); cdAnnotSetMode('none'); }
+      break;
+    }
     case 'Delete': case 'Backspace':
       if (CD.annotEngine.active && CD.annotEngine.mode !== 'none') { e.preventDefault(); cdAnnotClearFrame(); } break;
     case 'Digit1': case 'Digit2': case 'Digit3': case 'Digit4': case 'Digit5':

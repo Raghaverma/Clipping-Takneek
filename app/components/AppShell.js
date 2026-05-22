@@ -55,17 +55,102 @@ export default function AppShell({ activePage, showCatToggle, children }) {
             Clipping
           </Link>
         </nav>
-        {showCatToggle && (
-          <div className="cd-subnav-right">
+        <div className="cd-subnav-right">
+          {showCatToggle && (
             <div className="cd-cat-toggle">
               <button id="cd-cat-batsman" className="cd-cat-btn active" onClick={() => cdSetCategory('batsman')}>Batsman</button>
               <button id="cd-cat-bowler"  className="cd-cat-btn"        onClick={() => cdSetCategory('bowler')}>Bowler</button>
             </div>
-          </div>
-        )}
+          )}
+          <button id="cd-theme-btn" className="cd-theme-btn" onClick={() => cdToggleTheme()} title="Switch to dark mode">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="15" height="15"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>
+          </button>
+          <button className="cd-shortcuts-btn" onClick={() => cdToggleShortcutModal()} title="Keyboard shortcuts (?)">?</button>
+        </div>
       </div>
 
       {children}
+
+      {/* Keyboard shortcuts modal */}
+      <div className="cd-shortcuts-overlay is-hidden" id="cd-shortcuts-overlay" onClick={(e) => { if (e.target === e.currentTarget) cdToggleShortcutModal(); }}>
+        <div className="cd-shortcuts-card">
+          <div className="cd-shortcuts-header">
+            <span className="cd-shortcuts-title">Keyboard Shortcuts</span>
+            <button className="cd-shortcuts-close" onClick={() => cdToggleShortcutModal()}>✕</button>
+          </div>
+          <div className="cd-shortcuts-body">
+            <div>
+              <div className="cd-shortcuts-group-title">Playback</div>
+              {[
+                ['Play / Pause',     ['Space']],
+                ['Step 1 frame',     ['←', '→']],
+                ['Step 10 frames',   ['↑', '↓']],
+                ['Jump to 10–90%',   ['1–9']],
+                ['Mute / Unmute',    ['M']],
+              ].map(([desc, keys]) => (
+                <div className="cd-shortcuts-row" key={desc}>
+                  <span className="cd-shortcuts-desc">{desc}</span>
+                  <span className="cd-shortcuts-keys">{keys.map(k => <kbd className="cd-kbd" key={k}>{k}</kbd>)}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="cd-shortcuts-group-title">Clipping</div>
+              {[
+                ['Set Start point',  ['I']],
+                ['Set End point',    ['O']],
+                ['Add Clip',         ['A']],
+                ['Undo last clip',   ['Ctrl', 'Z']],
+              ].map(([desc, keys]) => (
+                <div className="cd-shortcuts-row" key={desc}>
+                  <span className="cd-shortcuts-desc">{desc}</span>
+                  <span className="cd-shortcuts-keys">{keys.map(k => <kbd className="cd-kbd" key={k}>{k}</kbd>)}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="cd-shortcuts-group-title">Zoom &amp; Pan</div>
+              {[
+                ['Zoom in / out',    ['+', '–']],
+                ['Zoom (scroll)',    ['Scroll']],
+                ['Pan',             ['Alt', 'Drag']],
+                ['Reset zoom',      ['Dbl-click']],
+              ].map(([desc, keys]) => (
+                <div className="cd-shortcuts-row" key={desc}>
+                  <span className="cd-shortcuts-desc">{desc}</span>
+                  <span className="cd-shortcuts-keys">{keys.map(k => <kbd className="cd-kbd" key={k}>{k}</kbd>)}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="cd-shortcuts-group-title">Ball Speed Annotation</div>
+              {[
+                ['Mark ball',               ['B']],
+                ['Clear frame annotations', ['Del']],
+                ['Deselect mode',           ['Esc']],
+              ].map(([desc, keys]) => (
+                <div className="cd-shortcuts-row" key={desc}>
+                  <span className="cd-shortcuts-desc">{desc}</span>
+                  <span className="cd-shortcuts-keys">{keys.map(k => <kbd className="cd-kbd" key={k}>{k}</kbd>)}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="cd-shortcuts-group-title">General</div>
+              {[
+                ['Refresh video list',       ['R']],
+                ['This shortcuts panel',     ['?']],
+                ['Close modal',              ['Esc']],
+              ].map(([desc, keys]) => (
+                <div className="cd-shortcuts-row" key={desc}>
+                  <span className="cd-shortcuts-desc">{desc}</span>
+                  <span className="cd-shortcuts-keys">{keys.map(k => <kbd className="cd-kbd" key={k}>{k}</kbd>)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Google OAuth login overlay */}
       <div className="cd-login-overlay is-hidden" id="cd-login-overlay">

@@ -36,6 +36,33 @@
   --transition: 0.15s ease;
 }
 
+/* ── Dark theme tokens ────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg-primary:   #0F0F0F;
+  --bg-surface:   #1A1A1A;
+  --bg-elevated:  #222222;
+
+  --border:        #2E2E2E;
+  --border-subtle: #252525;
+
+  --accent:        #F95320;
+  --accent-hover:  #FF6534;
+  --accent-muted:  rgba(249, 83, 32, 0.15);
+
+  --success:       #10B77F;
+  --success-muted: rgba(16, 183, 127, 0.15);
+
+  --warn:          #E06060;
+  --warn-muted:    rgba(224, 96, 96, 0.15);
+
+  --text-primary:   #F0F0F0;
+  --text-secondary: #8A93A8;
+  --text-muted:     #6B7488;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
 /* ── Display utility classes ──────────────────────────────── */
 .is-hidden { display: none !important; }
 .is-flex   { display: flex; }
@@ -748,6 +775,33 @@ input, select {
   display: flex; align-items: center; justify-content: center;
 }
 
+/* Thumbnail replacing icon in video list */
+.cd-vitem-thumb {
+  width: 48px;
+  height: 27px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  display: block;
+}
+.cd-vitem-thumb-wrap {
+  position: relative;
+  width: 48px;
+  height: 27px;
+  flex-shrink: 0;
+}
+.cd-vitem-thumb-wrap .cd-vitem-ready-dot {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  border: 1.5px solid var(--bg-elevated);
+}
+
 /* Status badge */
 .cd-vitem-status {
   display: inline-flex;
@@ -864,6 +918,141 @@ input, select {
 
 .cd-refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
 .cd-refresh-btn.spinning svg { animation: cdSpin 0.7s linear infinite; }
+
+/* Theme toggle button */
+.cd-theme-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+.cd-theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Shortcut hint button */
+.cd-shortcuts-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+.cd-shortcuts-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Shortcut modal overlay */
+.cd-shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 8000;
+  animation: cdFadeIn 0.15s ease;
+}
+.cd-shortcuts-card {
+  width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  animation: cdSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cd-shortcuts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cd-shortcuts-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.cd-shortcuts-close {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.cd-shortcuts-close:hover { background: var(--warn-muted); color: var(--warn); }
+.cd-shortcuts-body {
+  padding: 12px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.cd-shortcuts-group-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.cd-shortcuts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 12px;
+}
+.cd-shortcuts-row:last-child { border-bottom: none; }
+.cd-shortcuts-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.cd-shortcuts-keys {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.cd-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 5px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: inherit;
+}
 
 /* Load local video button */
 .cd-local-btn {
