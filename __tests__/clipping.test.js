@@ -187,3 +187,34 @@ describe('_cdNotify', () => {
     expect(window.document.querySelectorAll('.cd-toast').length).toBe(1);
   });
 });
+
+// ─── inference handoff UI ────────────────────────────────────────────────────
+
+describe('inference handoff', () => {
+  it('registers a separate inference pipeline adapter', () => {
+    const { window } = makeDOM();
+    const adapter = { run: () => ({ ok: true }) };
+    window.cdRegisterInferencePipeline(adapter);
+    expect(window.CD.inferencePipeline).toBe(adapter);
+  });
+
+  it('renders tensor-ready state on clip cards', () => {
+    const { window } = makeDOM(`
+      <div id="cd-clips-scroll"></div>
+      <span id="cd-clip-count"></span>
+    `);
+    window.CD.clips = [{
+      id: 'clip-1',
+      label: 'Clip 1',
+      inTime: 1,
+      outTime: 2,
+      annotations: [],
+      inference: { status: 'ready', frameCount: 3, tensorCount: 3 },
+    }];
+    window.renderClips();
+    const badge = window.document.querySelector('.cd-inference-badge');
+    expect(badge).not.toBeNull();
+    expect(badge.textContent.trim()).toBe('tensors ready');
+    expect(badge.getAttribute('title')).toContain('3 frame');
+  });
+});

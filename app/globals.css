@@ -1946,6 +1946,40 @@ input, select {
   border-radius: 100px;
 }
 
+.cd-inference-badge {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text-muted);
+  background: var(--bg-muted);
+  border: 1px solid var(--border-subtle);
+  padding: 2px 6px;
+  border-radius: 100px;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-inference-badge--queued,
+.cd-inference-badge--extracting {
+  color: var(--accent);
+  background: var(--accent-muted);
+  border-color: transparent;
+}
+
+.cd-inference-badge--ready,
+.cd-inference-badge--complete {
+  color: var(--success);
+  background: var(--success-muted);
+  border-color: transparent;
+}
+
+.cd-inference-badge--failed {
+  color: var(--warn);
+  background: var(--warn-muted);
+  border-color: transparent;
+}
+
 .cd-clip-del {
   width: 20px;
   height: 20px;

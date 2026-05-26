@@ -7,6 +7,14 @@ const _cfg              = window.__CD_CONFIG__ || {};
 const GOOGLE_CLIENT_ID  = _cfg.googleClientId   || '';
 const OAUTH_REDIRECT_URI = _cfg.redirectUri || `${location.origin}/oauth-callback.html`;
 const METADATA_UPLOAD_ENABLED = !!_cfg.metadataUploadEnabled;
+const FFMPEG_WASM_URL = _cfg.ffmpegWasmUrl || '/vendor/ffmpeg/ffmpeg.js';
+const FFMPEG_CORE_URL = _cfg.ffmpegCoreUrl || 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js';
+const FFMPEG_WASM_CORE_URL = _cfg.ffmpegCoreWasmUrl || 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm';
+const INFERENCE_FRAME_FPS = Math.max(1, Number(_cfg.inferenceFrameFps || 5));
+const INFERENCE_FRAME_WIDTH = Math.max(64, Number(_cfg.inferenceFrameWidth || 320));
+const INFERENCE_MAX_FRAMES = Math.max(1, Number(_cfg.inferenceMaxFrames || 24));
+const INFERENCE_TENSOR_SIZE = Math.max(32, Number(_cfg.inferenceTensorSize || 224));
+const LOCAL_INFERENCE_ADAPTER_URL = _cfg.localInferenceAdapterUrl || '/api/inference/adapter.js';
 
 function _assertRuntimeConfig() {
   const missing = [];
@@ -65,6 +73,12 @@ var CD = {
     drag: null,    // {type, frame, ...} while dragging a point
     speedResult: null,    // {avgKmh, maxKmh, smoothed, n}
   },
+
+  // Clip → frames → tensors → inference handoff state.
+  // FFmpeg.wasm only handles media extraction/decoding; model execution is delegated
+  // to a separately registered inference adapter.
+  inferencePipeline: null,
+  inferenceJobs: {},
 };
 
 const STAGES = {
@@ -497,7 +511,7 @@ function _loadVideoFromBlob(file) {
     analysis_type: CD.category === 'bowler' ? 'bowler' : 'batter',
   };
 
-  CD.clips = []; CD.clipCounter = 0; CD.annCounter = 0;
+  CD.clips = []; CD.clipCounter = 0; CD.annCounter = 0; CD.inferenceJobs = {};
   CD.inPoint = null; CD.outPoint = null; CD.generated = false;
   CD.selectedClipId = null; CD.duration = 0;
   CD.sessionId = uid('sess');
@@ -1045,6 +1059,7 @@ async function cdSelectVideo(id) {
   CD.activeVideo = video;
   history.pushState(null, '', '/clipping/' + id);
   CD.clips = [];
+  CD.inferenceJobs = {};
   CD.clipCounter = 0;
   CD.annCounter = 0;
   CD.inPoint = null;
@@ -1283,6 +1298,312 @@ function renderMarkers() {
   seekLayers.innerHTML = html;
 }
 
+// Clip → tensor source handoff
+// FFmpeg.wasm is intentionally limited to extraction/decoding/preprocessing.
+// Inference is executed only by a separate adapter registered through
+// cdRegisterInferencePipeline({ run({ clip, clipBlob, frames, tensors }) { ... } }).
+let _ffmpegInstance = null;
+let _ffmpegLoadPromise = null;
+let _ffmpegUrlCache = {};
+let _inferenceQueue = Promise.resolve();
+let _localInferenceAdapterPromise = null;
+
+function cdRegisterInferencePipeline(pipeline) {
+  if (!pipeline || typeof pipeline.run !== 'function') {
+    throw new Error('Inference pipeline must expose a run({ clip, clipBlob, frames, tensors }) function');
+  }
+  CD.inferencePipeline = pipeline;
+  cdStatus('Inference pipeline registered', 'ok');
+}
+
+function cdClearInferencePipeline() {
+  CD.inferencePipeline = null;
+  cdStatus('Inference pipeline cleared');
+}
+
+async function cdLoadLocalInferenceAdapter(url = LOCAL_INFERENCE_ADAPTER_URL) {
+  if (CD.inferencePipeline) return CD.inferencePipeline;
+  if (_localInferenceAdapterPromise) return _localInferenceAdapterPromise;
+
+  _localInferenceAdapterPromise = import(`${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`)
+    .then(mod => {
+      const pipeline = mod.default || mod.pipeline || (typeof mod.createInferencePipeline === 'function' ? mod.createInferencePipeline() : null);
+      if (!pipeline) throw new Error('Adapter did not export a pipeline');
+      cdRegisterInferencePipeline(pipeline);
+      _clientLog('inference.adapter.loaded', { url });
+      return pipeline;
+    })
+    .catch(error => {
+      if (!String(error?.message || '').includes('404')) {
+        _clientLog('inference.adapter.load.failed', { url, message: error.message }, 'warn');
+      }
+      return null;
+    })
+    .finally(() => { _localInferenceAdapterPromise = null; });
+
+  return _localInferenceAdapterPromise;
+}
+
+function _setClipInferenceState(clip, patch) {
+  if (!clip) return;
+  clip.inference = {
+    ...(clip.inference || {}),
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  };
+  renderClips();
+}
+
+function _loadExternalScript(src) {
+  if (window.FFmpegWASM?.FFmpeg) return Promise.resolve();
+  if (document.querySelector(`script[data-cd-src="${src}"]`)) {
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[data-cd-src="${src}"]`);
+      existing.addEventListener('load', resolve, { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Could not load ${src}`)), { once: true });
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.dataset.cdSrc = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`Could not load ${src}`));
+    document.head.appendChild(s);
+  });
+}
+
+async function _toBlobURL(url, mimeType) {
+  if (_ffmpegUrlCache[url]) return _ffmpegUrlCache[url];
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Could not fetch FFmpeg asset ${url}: HTTP ${res.status}`);
+  const blobUrl = URL.createObjectURL(new Blob([await res.arrayBuffer()], { type: mimeType }));
+  _ffmpegUrlCache[url] = blobUrl;
+  return blobUrl;
+}
+
+async function _ensureFFmpeg() {
+  if (_ffmpegInstance?.loaded) return _ffmpegInstance;
+  if (_ffmpegLoadPromise) return _ffmpegLoadPromise;
+
+  _ffmpegLoadPromise = (async () => {
+    cdStatus('Loading FFmpeg.wasm for clip extraction…', 'info');
+    await _loadExternalScript(FFMPEG_WASM_URL);
+    const FFmpeg = window.FFmpegWASM?.FFmpeg;
+    if (!FFmpeg) throw new Error('FFmpeg.wasm global was not available after loading');
+
+    const ffmpeg = new FFmpeg();
+    ffmpeg.on('log', ({ message }) => {
+      if (message) _clientLog('ffmpeg.log', { message: String(message).slice(0, 300) });
+    });
+    ffmpeg.on('progress', ({ progress }) => {
+      if (typeof progress === 'number') cdStatus(`Extracting clip frames… ${Math.round(progress * 100)}%`, 'info');
+    });
+
+    await ffmpeg.load({
+      coreURL: await _toBlobURL(FFMPEG_CORE_URL, 'text/javascript'),
+      wasmURL: await _toBlobURL(FFMPEG_WASM_CORE_URL, 'application/wasm'),
+    });
+    _ffmpegInstance = ffmpeg;
+    cdStatus('FFmpeg.wasm ready', 'ok');
+    return ffmpeg;
+  })().finally(() => { _ffmpegLoadPromise = null; });
+
+  return _ffmpegLoadPromise;
+}
+
+function _activeVideoSourceUrl() {
+  return videoEl?.currentSrc
+    || videoEl?.src
+    || CD.activeVideo?.video_processed_url
+    || CD.activeVideo?.video_url
+    || '';
+}
+
+async function _readActiveVideoBytes() {
+  const src = _activeVideoSourceUrl();
+  if (!src) throw new Error('No active video source available for FFmpeg extraction');
+  const res = await fetch(src);
+  if (!res.ok) throw new Error(`Could not fetch video source for FFmpeg: HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+function _safeMediaName(name, fallback = 'input.mp4') {
+  const clean = String(name || fallback).split('/').pop().replace(/[^\w.-]+/g, '_');
+  return clean || fallback;
+}
+
+async function _extractClipBlobWithFFmpeg(ffmpeg, clip) {
+  const inputName = _safeMediaName(CD.activeVideo?.original_filename || CD.activeVideo?.display_name, 'input.mp4');
+  const clipName = `${clip.id}.mp4`;
+  const duration = Math.max(0.05, clip.outTime - clip.inTime);
+
+  await ffmpeg.writeFile(inputName, await _readActiveVideoBytes());
+  try {
+    const code = await ffmpeg.exec([
+      '-ss', String(clip.inTime),
+      '-t', String(duration),
+      '-i', inputName,
+      '-c', 'copy',
+      clipName,
+    ]);
+    if (code !== 0) throw new Error(`FFmpeg clip extraction exited with ${code}`);
+    const data = await ffmpeg.readFile(clipName);
+    return { clipName, clipBlob: new Blob([data], { type: 'video/mp4' }) };
+  } finally {
+    ffmpeg.deleteFile(inputName).catch(() => {});
+  }
+}
+
+async function _decodeClipFramesWithFFmpeg(ffmpeg, clipName, clipId) {
+  const framePrefix = `${clipId}_frame_`;
+  const vf = `fps=${INFERENCE_FRAME_FPS},scale=${INFERENCE_FRAME_WIDTH}:-1`;
+  const code = await ffmpeg.exec([
+    '-i', clipName,
+    '-vf', vf,
+    '-q:v', '3',
+    `${framePrefix}%04d.jpg`,
+  ]);
+  if (code !== 0) throw new Error(`FFmpeg frame decoding exited with ${code}`);
+
+  const files = (await ffmpeg.listDir('/'))
+    .map(node => node.name)
+    .filter(name => name.startsWith(framePrefix) && name.endsWith('.jpg'))
+    .sort()
+    .slice(0, INFERENCE_MAX_FRAMES);
+
+  const frames = [];
+  for (let i = 0; i < files.length; i++) {
+    const name = files[i];
+    const bytes = await ffmpeg.readFile(name);
+    frames.push({
+      name,
+      index: i,
+      timestamp: i / INFERENCE_FRAME_FPS,
+      blob: new Blob([bytes], { type: 'image/jpeg' }),
+    });
+    ffmpeg.deleteFile(name).catch(() => {});
+  }
+  ffmpeg.deleteFile(clipName).catch(() => {});
+  return frames;
+}
+
+async function _frameToTensor(frame) {
+  if (typeof createImageBitmap !== 'function') {
+    return {
+      type: 'image/jpeg',
+      sourceFrame: frame.name,
+      timestamp: frame.timestamp,
+      blob: frame.blob,
+    };
+  }
+
+  const bitmap = await createImageBitmap(frame.blob);
+  const canvas = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(INFERENCE_TENSOR_SIZE, INFERENCE_TENSOR_SIZE)
+    : Object.assign(document.createElement('canvas'), {
+        width: INFERENCE_TENSOR_SIZE,
+        height: INFERENCE_TENSOR_SIZE,
+      });
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0, INFERENCE_TENSOR_SIZE, INFERENCE_TENSOR_SIZE);
+  if (bitmap.close) bitmap.close();
+
+  const pixels = ctx.getImageData(0, 0, INFERENCE_TENSOR_SIZE, INFERENCE_TENSOR_SIZE).data;
+  const data = new Float32Array(INFERENCE_TENSOR_SIZE * INFERENCE_TENSOR_SIZE * 3);
+  for (let p = 0, t = 0; p < pixels.length; p += 4) {
+    data[t++] = pixels[p] / 255;
+    data[t++] = pixels[p + 1] / 255;
+    data[t++] = pixels[p + 2] / 255;
+  }
+  return {
+    type: 'float32',
+    layout: 'nhwc',
+    shape: [1, INFERENCE_TENSOR_SIZE, INFERENCE_TENSOR_SIZE, 3],
+    sourceFrame: frame.name,
+    timestamp: frame.timestamp,
+    data,
+  };
+}
+
+async function _framesToTensorSources(frames) {
+  const tensors = [];
+  for (const frame of frames) tensors.push(await _frameToTensor(frame));
+  return tensors;
+}
+
+async function _runClipInferenceHandoff(clip) {
+  await cdLoadLocalInferenceAdapter();
+  const ffmpeg = await _ensureFFmpeg();
+  const { clipName, clipBlob } = await _extractClipBlobWithFFmpeg(ffmpeg, clip);
+  const frames = await _decodeClipFramesWithFFmpeg(ffmpeg, clipName, clip.id);
+  const tensors = await _framesToTensorSources(frames);
+
+  const context = {
+    clip,
+    clipBlob,
+    frames,
+    tensors,
+    metadata: {
+      clipId: clip.id,
+      startTime: clip.inTime,
+      endTime: clip.outTime,
+      duration: clip.outTime - clip.inTime,
+      fps: CD.fps,
+      frameFps: INFERENCE_FRAME_FPS,
+    },
+  };
+
+  const result = CD.inferencePipeline
+    ? await CD.inferencePipeline.run(context)
+    : { status: 'ready_for_inference', message: 'No inference adapter registered' };
+
+  CD.inferenceJobs[clip.id] = {
+    clipBlob,
+    frames,
+    tensors,
+    result,
+    createdAt: new Date().toISOString(),
+  };
+
+  return { result, frameCount: frames.length, tensorCount: tensors.length };
+}
+
+function _queueClipInference(clip) {
+  if (!clip) return;
+  _setClipInferenceState(clip, { status: 'queued', frameCount: 0, tensorCount: 0, error: null });
+  _inferenceQueue = _inferenceQueue
+    .catch(() => {})
+    .then(async () => {
+      _setClipInferenceState(clip, { status: 'extracting' });
+      try {
+        const { result, frameCount, tensorCount } = await _runClipInferenceHandoff(clip);
+        _setClipInferenceState(clip, {
+          status: CD.inferencePipeline ? 'complete' : 'ready',
+          frameCount,
+          tensorCount,
+          result,
+          error: null,
+        });
+        cdStatus(CD.inferencePipeline
+          ? `${clip.label} inference complete`
+          : `${clip.label} decoded into ${tensorCount} tensor source(s)`, 'ok');
+        _clientLog('inference.handoff.complete', { clipId: clip.id, frameCount, tensorCount });
+      } catch (error) {
+        _setClipInferenceState(clip, { status: 'failed', error: error.message });
+        cdStatus(`${clip.label} inference handoff failed — ${error.message}`, 'err');
+        _clientLog('inference.handoff.failed', { clipId: clip.id, message: error.message }, 'error');
+      }
+    });
+}
+
+function cdProcessClipForInference(clipId = CD.selectedClipId) {
+  const clip = CD.clips.find(c => c.id === clipId);
+  if (!clip) { cdStatus('Select a clip before running inference', 'err'); return; }
+  _queueClipInference(clip);
+}
+
 // Add clip
 function cdAddClip() {
   if (!CD.activeVideo) { cdStatus('Select a video first', 'err'); return; }
@@ -1302,6 +1623,7 @@ function cdAddClip() {
   cdGenerateClips(true);
   cdStatus(`Added ${clip.label} — ${fmtTime(inT)} → ${fmtTime(outT)}  (${fmtTime(outT - inT)})`, 'ok');
   _saveClipsDraft();
+  _queueClipInference(clip);
 
   if (CD.category === 'bowler') cdSelectClip(clip.id);
 }
@@ -1355,6 +1677,7 @@ function cdSelectClip(id) {
 function cdDeleteClip(e, id) {
   e.stopPropagation();
   CD.clips = CD.clips.filter(c => c.id !== id);
+  delete CD.inferenceJobs[id];
   if (CD.selectedClipId === id) { CD.selectedClipId = null; _detachClipBoundary(); }
   renderClips(); renderMarkers(); renderAnnPanel(); updateUploadBtn();
   cdGenerateClips(true);
@@ -1392,6 +1715,14 @@ function renderClips() {
       ? `<span class="cd-shot-badge">${escHtml(BATSMAN_SHOTS[clip.shotType] || clip.shotType)}</span>`
       : '';
 
+    const inf = clip.inference || {};
+    const inferenceBadge = inf.status
+      ? `<span class="cd-inference-badge cd-inference-badge--${escHtml(inf.status)}"
+          title="${escHtml(inf.error || `${inf.frameCount || 0} frame(s), ${inf.tensorCount || 0} tensor source(s)`) }">
+          ${escHtml(inf.status === 'ready' ? 'tensors ready' : inf.status)}
+        </span>`
+      : '';
+
     const stagesHtml = selected && clip.annotations.length > 0
       ? `<div class="cd-clip-stages">${clip.annotations.map(ann => {
         const loc = ann.frameStart !== undefined
@@ -1417,6 +1748,7 @@ function renderClips() {
           <div class="cd-clip-right">
             <span class="cd-clip-dur">${fmtTime(dur)}</span>
             ${shotBadge}${annBadge}
+            ${inferenceBadge}
             <button class="cd-clip-del" onclick="cdDeleteClip(event,'${clip.id}')" title="Delete">×</button>
           </div>
         </div>
