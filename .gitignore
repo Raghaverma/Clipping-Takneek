@@ -4,6 +4,7 @@ out/
 
 # Dependencies
 node_modules/
+venv/
 
 # Environment
 .env
@@ -22,3 +23,26 @@ yarn-error.log*
 # OMC
 .omc/
 .claude/
+
+#  Inputs
+inputs/
+
+*.mp4
+inference/uploads/
+
+# Heavy/generated artifacts
+**/venv/
+**/__pycache__/
+*.py[cod]
+*.pyd
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.h5
+*.tflite
+*.pb
+*.npz
+*.tar.gz
+*.tar
+*.zip
