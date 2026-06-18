@@ -36,13 +36,20 @@ export default function ClippingView({ videoId }) {
             <div className="cd-placeholder cd-drop-zone" id="cd-placeholder"
                  onDragOver={(e) => cdDragOver(e)}
                  onDragLeave={(e) => cdDragLeave(e)}
-                 onDrop={(e) => cdDrop(e)}>
+                 onDrop={(e) => cdDrop(e)}
+                 onClick={() => cdLoadLocalVideo()}>
               <svg className="cd-placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                    strokeWidth="1.4" width="52" height="52">
                 <path strokeLinecap="round" strokeLinejoin="round"
                   d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
               </svg>
               <p className="cd-placeholder-text">Drop a video file here</p>
+              <div className="cd-upload-zone-btn">
+                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                  <path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+                </svg>
+                Upload Video
+              </div>
               <span className="cd-placeholder-hint">MP4, MOV, AVI, MKV supported</span>
             </div>
 

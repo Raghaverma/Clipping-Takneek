@@ -621,6 +621,14 @@ function _cdDomInit() {
     // Pre-fill search from ?search= param (set by cdOpenPlayerClips)
     const _sq = new URLSearchParams(location.search).get('search');
     if (_sq) { const s = document.getElementById('cd-search-input'); if (s) s.value = _sq; }
+
+    // Auto-upload if ?upload=1 or ?upload=true is specified
+    const _uploadParam = new URLSearchParams(location.search).get('upload');
+    if (_uploadParam) {
+      setTimeout(() => {
+        cdLoadLocalVideo();
+      }, 300);
+    }
   }
 
   // Apply saved theme before first paint

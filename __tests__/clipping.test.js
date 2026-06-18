@@ -218,3 +218,86 @@ describe('inference handoff', () => {
     expect(badge.getAttribute('title')).toContain('3 frame');
   });
 });
+
+// ─── local video loading ──────────────────────────────────────────────────────
+
+describe('local video loading', () => {
+  let window;
+  let document;
+
+  beforeEach(() => {
+    const dom = makeDOM(`
+      <div id="cd-video-bar" style="display:none">
+        <span id="cd-vbar-name"></span>
+        <span id="cd-vbar-player"></span>
+        <span id="cd-vbar-angle"></span>
+        <span id="cd-vbar-dur"></span>
+      </div>
+      <div id="cd-placeholder"></div>
+      <video id="cd-video" style="display:none"></video>
+      <div id="cd-seekbar-wrap">
+        <div id="cd-seek-track">
+          <div id="cd-seek-buffer"></div>
+          <div id="cd-seek-fill"></div>
+          <div id="cd-seek-layers"></div>
+          <div id="cd-seek-thumb"></div>
+        </div>
+      </div>
+      <div id="cd-seek-tooltip"></div>
+      <span id="cd-time-cur"></span>
+      <span id="cd-time-dur"></span>
+      <button id="cd-play-btn"></button>
+      <button id="cd-mute-btn"></button>
+      <canvas id="cd-speed-canvas"></canvas>
+      <div id="cd-clips-scroll"></div>
+      <span id="cd-clip-count"></span>
+      <div id="cd-ann-stages"></div>
+      <div id="cd-ann-progress"></div>
+      <div id="cd-ann-panel"></div>
+      <div id="cd-ann-no-sel"></div>
+      <div id="cd-ann-header"></div>
+      <div id="cd-in-chip"></div>
+      <div id="cd-in-val"></div>
+      <div id="cd-out-chip"></div>
+      <div id="cd-out-val"></div>
+      <button id="cd-upload-btn"></button>
+    `);
+    window = dom.window;
+    document = window.document;
+
+    // Mock URL object methods
+    window.URL.createObjectURL = (file) => 'blob:http://test/' + file.name;
+    window.URL.revokeObjectURL = () => {};
+
+    // Initialize DOM variables that clipping.js binds
+    window._cdDomInit();
+  });
+
+  it('cdLoadLocalVideo creates a file input and triggers click', async () => {
+    let inputClicked = false;
+    const originalCreateElement = document.createElement;
+    document.createElement = function(tagName) {
+      const el = originalCreateElement.call(document, tagName);
+      if (tagName === 'input') {
+        el.click = () => { inputClicked = true; };
+      }
+      return el;
+    };
+
+    window.cdLoadLocalVideo();
+    expect(inputClicked).toBe(true);
+    document.createElement = originalCreateElement;
+  });
+
+  it('_loadVideoFromBlob updates DOM and CD state correctly', () => {
+    const file = { name: 'test_video.mp4', size: 1024 * 1024 };
+    window._loadVideoFromBlob(file);
+
+    expect(window.CD.activeVideo).not.toBeNull();
+    expect(window.CD.activeVideo.display_name).toBe('test_video.mp4');
+    expect(window.CD.activeVideo.player_name).toBe('Local File');
+    expect(window.document.getElementById('cd-vbar-name').textContent).toBe('test_video.mp4');
+    expect(window.document.getElementById('cd-vbar-player').textContent).toBe('Local File');
+    expect(window.document.getElementById('cd-placeholder').style.display).toBe('none');
+  });
+});

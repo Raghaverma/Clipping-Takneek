@@ -56,6 +56,14 @@ export default function AppShell({ activePage, showCatToggle, children }) {
           </Link>
         </nav>
         <div className="cd-subnav-right">
+          {activePage === 'clipping' && (
+            <button className="cd-local-btn" onClick={() => cdLoadLocalVideo()} title="Load local video from computer">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="12" height="12">
+                <path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+              </svg>
+              Upload Video
+            </button>
+          )}
           {showCatToggle && (
             <div className="cd-cat-toggle">
               <button id="cd-cat-batsman" className="cd-cat-btn active" onClick={() => cdSetCategory('batsman')}>Batsman</button>
